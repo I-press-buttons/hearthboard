@@ -67,12 +67,20 @@ describe('expandIcs', () => {
 
   it('keeps only occurrences overlapping the window', () => {
     const occ = expandIcs(weekly, ...range('2026-10-10T00:00:00Z', '2026-10-20T00:00:00Z'));
-    expect(occ.map((o) => o.start)).toEqual(['2026-10-12T13:00:00.000Z', '2026-10-19T13:00:00.000Z']);
+    expect(occ.map((o) => o.start)).toEqual([
+      '2026-10-12T13:00:00.000Z',
+      '2026-10-19T13:00:00.000Z',
+    ]);
   });
 
   it('returns all-day events as dates with an exclusive end', () => {
     const [o] = expandIcs(allDay, ...range('2026-10-01T00:00:00Z', '2026-11-01T00:00:00Z'));
-    expect(o).toMatchObject({ start: '2026-10-10', end: '2026-10-11', allDay: true, recurring: false });
+    expect(o).toMatchObject({
+      start: '2026-10-10',
+      end: '2026-10-11',
+      allDay: true,
+      recurring: false,
+    });
   });
 });
 
@@ -106,14 +114,23 @@ describe('patchIcs', () => {
       title: 'Later standup',
     });
     const occ = expandIcs(out, ...range('2026-10-01T00:00:00Z', '2026-12-31T00:00:00Z'));
-    expect(occ[0]).toMatchObject({ start: '2026-10-05T14:00:00.000Z', end: '2026-10-05T15:30:00.000Z', title: 'Later standup' });
+    expect(occ[0]).toMatchObject({
+      start: '2026-10-05T14:00:00.000Z',
+      end: '2026-10-05T15:30:00.000Z',
+      title: 'Later standup',
+    });
     // Still 10:00 local after DST ends.
     expect(occ[5].start).toBe('2026-11-09T15:00:00.000Z');
   });
 
   it('moves a plain event and keeps the duration when only start is given', () => {
     const ics = buildIcs(
-      { title: 'Dentist', start: '2026-10-20T15:00:00Z', end: '2026-10-20T16:30:00Z', allDay: false },
+      {
+        title: 'Dentist',
+        start: '2026-10-20T15:00:00Z',
+        end: '2026-10-20T16:30:00Z',
+        allDay: false,
+      },
       'uid-1',
     );
     const out = patchIcs(ics, { start: '2026-10-21T13:00:00Z' });
@@ -123,7 +140,10 @@ describe('patchIcs', () => {
   });
 
   it('converts a timed event into an all-day one', () => {
-    const ics = buildIcs({ title: 'X', start: '2026-10-20T15:00:00Z', end: '2026-10-20T16:00:00Z', allDay: false }, 'u');
+    const ics = buildIcs(
+      { title: 'X', start: '2026-10-20T15:00:00Z', end: '2026-10-20T16:00:00Z', allDay: false },
+      'u',
+    );
     const out = patchIcs(ics, { start: '2026-10-20', end: '2026-10-21', allDay: true });
     expect(out).toMatch(/DTSTART;VALUE=DATE:20261020/);
     const [o] = expandIcs(out, ...range('2026-10-01T00:00:00Z', '2026-11-01T00:00:00Z'));
@@ -144,7 +164,13 @@ describe('removeOccurrence', () => {
 describe('buildIcs', () => {
   it('writes a valid VCALENDAR with escaped text', () => {
     const out = buildIcs(
-      { title: 'Soccer, then pizza; bring cleats', start: '2026-10-10', end: '2026-10-11', allDay: true, location: 'Field 3' },
+      {
+        title: 'Soccer, then pizza; bring cleats',
+        start: '2026-10-10',
+        end: '2026-10-11',
+        allDay: true,
+        location: 'Field 3',
+      },
       'abc@hearthboard',
     );
     expect(out).toMatch(/^BEGIN:VCALENDAR/);

@@ -60,7 +60,10 @@ export class Quotes {
           : mode;
     if (kind === 'custom') {
       const list = this.custom();
-      if (list.length) return { kind, ...pick(list, period, 'custom') };
+      if (list.length) {
+        const { text, source } = pick(list, period, 'custom');
+        return { kind, text, source };
+      }
       kind = 'verse';
     }
     return kind === 'verse'
