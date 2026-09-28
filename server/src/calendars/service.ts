@@ -57,7 +57,16 @@ interface ResourceRow {
   updated_at: number;
 }
 
-const PALETTE = ['#f59e0b', '#38bdf8', '#a78bfa', '#34d399', '#f472b6', '#fb7185', '#facc15', '#60a5fa'];
+const PALETTE = [
+  '#f59e0b',
+  '#38bdf8',
+  '#a78bfa',
+  '#34d399',
+  '#f472b6',
+  '#fb7185',
+  '#facc15',
+  '#60a5fa',
+];
 const DAY = 86_400_000;
 const CALENDAR_LIST_REFRESH_MS = 15 * 60_000;
 
@@ -98,14 +107,16 @@ export class CalendarService {
   // ---------- accounts & calendars ----------
 
   listAccounts(): AccountDTO[] {
-    return (this.db.prepare('SELECT * FROM accounts ORDER BY rowid').all() as AccountRow[]).map((a) => ({
-      id: a.id,
-      provider: a.provider,
-      name: a.name,
-      status: a.status,
-      lastError: a.last_error,
-      lastSync: a.last_sync,
-    }));
+    return (this.db.prepare('SELECT * FROM accounts ORDER BY rowid').all() as AccountRow[]).map(
+      (a) => ({
+        id: a.id,
+        provider: a.provider,
+        name: a.name,
+        status: a.status,
+        lastError: a.last_error,
+        lastSync: a.last_sync,
+      }),
+    );
   }
 
   listCalendars(): CalendarDTO[] {
@@ -150,7 +161,8 @@ export class CalendarService {
   }
 
   updateCalendar(id: string, patch: { enabled?: boolean; color?: string; name?: string }) {
-    const cur = this.db.prepare('SELECT * FROM calendars WHERE id = ?').get(id) as CalendarRow | undefined;
+    const cur = this.db.prepare('SELECT * FROM calendars WHERE id = ?').get(id) as
+      CalendarRow | undefined;
     if (!cur) throw new HttpError(404, 'No such calendar');
     this.db
       .prepare('UPDATE calendars SET enabled = ?, color = ?, name = ? WHERE id = ?')
@@ -166,7 +178,8 @@ export class CalendarService {
   }
 
   private account(id: string): AccountRow {
-    const row = this.db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as AccountRow | undefined;
+    const row = this.db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as
+      AccountRow | undefined;
     if (!row) throw new HttpError(404, 'No such account');
     return row;
   }
@@ -186,8 +199,13 @@ export class CalendarService {
     this.providers.set(accountId, provider);
   }
 
-  private storeCalendarList(accountId: string, remote: Awaited<ReturnType<CalendarProvider['listCalendars']>>) {
-    const existing = this.db.prepare('SELECT * FROM calendars WHERE account_id = ?').all(accountId) as CalendarRow[];
+  private storeCalendarList(
+    accountId: string,
+    remote: Awaited<ReturnType<CalendarProvider['listCalendars']>>,
+  ) {
+    const existing = this.db
+      .prepare('SELECT * FROM calendars WHERE account_id = ?')
+      .all(accountId) as CalendarRow[];
     const byRemote = new Map(existing.map((c) => [c.remote_id, c]));
     const used = (this.db.prepare('SELECT COUNT(*) AS n FROM calendars').get() as { n: number }).n;
     const tx = this.db.transaction(() => {
@@ -213,7 +231,8 @@ export class CalendarService {
             );
         }
       });
-      for (const gone of byRemote.values()) this.db.prepare('DELETE FROM calendars WHERE id = ?').run(gone.id);
+      for (const gone of byRemote.values())
+        this.db.prepare('DELETE FROM calendars WHERE id = ?').run(gone.id);
     });
     tx();
   }
@@ -231,7 +250,9 @@ export class CalendarService {
   }
 
   async syncAll() {
-    const ids = (this.db.prepare('SELECT id FROM accounts').all() as { id: string }[]).map((r) => r.id);
+    const ids = (this.db.prepare('SELECT id FROM accounts').all() as { id: string }[]).map(
+      (r) => r.id,
+    );
     await Promise.all(ids.map((id) => this.syncAccount(id)));
   }
 
@@ -265,9 +286,9 @@ export class CalendarService {
   }
 
   private setStatus(accountId: string, status: AccountRow['status'], error: string | null) {
-    const prev = this.db.prepare('SELECT status, last_error FROM accounts WHERE id = ?').get(accountId) as
-      | Pick<AccountRow, 'status' | 'last_error'>
-      | undefined;
+    const prev = this.db
+      .prepare('SELECT status, last_error FROM accounts WHERE id = ?')
+      .get(accountId) as Pick<AccountRow, 'status' | 'last_error'> | undefined;
     if (!prev) return;
     this.db
       .prepare('UPDATE accounts SET status = ?, last_error = ?, last_sync = ? WHERE id = ?')
@@ -283,10 +304,13 @@ export class CalendarService {
     const tx = this.db.transaction(() => {
       if (result.full) {
         const keep = new Set(result.upserts.map((r) => r.remoteId));
-        const stored = this.db.prepare('SELECT remote_id FROM resources WHERE calendar_id = ?').all(cal.id) as {
+        const stored = this.db
+          .prepare('SELECT remote_id FROM resources WHERE calendar_id = ?')
+          .all(cal.id) as {
           remote_id: string;
         }[];
-        for (const s of stored) if (!keep.has(s.remote_id)) this.deleteResource(cal.id, s.remote_id);
+        for (const s of stored)
+          if (!keep.has(s.remote_id)) this.deleteResource(cal.id, s.remote_id);
       }
       for (const r of result.upserts) this.upsertResource(cal.id, r);
       for (const d of result.deletes) this.deleteResource(cal.id, d);
@@ -299,8 +323,7 @@ export class CalendarService {
   private upsertResource(calendarId: string, r: RemoteResource): string {
     const id = shortHash(calendarId, r.remoteId);
     const prev = this.db.prepare('SELECT etag, payload FROM resources WHERE id = ?').get(id) as
-      | { etag: string | null; payload: string }
-      | undefined;
+      { etag: string | null; payload: string } | undefined;
     if (prev && prev.etag === r.etag && prev.payload === r.payload) return id;
     this.db
       .prepare(
@@ -347,7 +370,9 @@ export class CalendarService {
     );
     const out: EventDTO[] = [];
     for (const cal of cals) {
-      const rows = this.db.prepare('SELECT * FROM resources WHERE calendar_id = ?').all(cal.id) as ResourceRow[];
+      const rows = this.db
+        .prepare('SELECT * FROM resources WHERE calendar_id = ?')
+        .all(cal.id) as ResourceRow[];
       for (const r of rows) {
         for (const o of this.occurrences(r)) {
           const s = Date.parse(o.allDay ? o.start + 'T00:00:00' : o.start);
@@ -377,14 +402,16 @@ export class CalendarService {
   // ---------- writing ----------
 
   private calendarRow(id: string): CalendarRow {
-    const cal = this.db.prepare('SELECT * FROM calendars WHERE id = ?').get(id) as CalendarRow | undefined;
+    const cal = this.db.prepare('SELECT * FROM calendars WHERE id = ?').get(id) as
+      CalendarRow | undefined;
     if (!cal) throw new HttpError(404, 'No such calendar');
     if (!cal.writable) throw new HttpError(403, 'That calendar is read-only.');
     return cal;
   }
 
   private resourceRow(id: string): ResourceRow {
-    const r = this.db.prepare('SELECT * FROM resources WHERE id = ?').get(id) as ResourceRow | undefined;
+    const r = this.db.prepare('SELECT * FROM resources WHERE id = ?').get(id) as
+      ResourceRow | undefined;
     if (!r) throw new HttpError(404, 'That event no longer exists. The board will refresh.');
     return r;
   }
@@ -400,13 +427,21 @@ export class CalendarService {
     return id;
   }
 
-  private async write(resourceId: string, op: (p: CalendarProvider, cal: CalendarRow, r: RemoteResource) => Promise<WriteResult>) {
+  private async write(
+    resourceId: string,
+    op: (p: CalendarProvider, cal: CalendarRow, r: RemoteResource) => Promise<WriteResult>,
+  ) {
     const r = this.resourceRow(resourceId);
     const cal = this.calendarRow(r.calendar_id);
     const p = this.provider(cal.account_id);
     let result: WriteResult;
     try {
-      result = await op(p, cal, { remoteId: r.remote_id, etag: r.etag, kind: r.kind, payload: r.payload });
+      result = await op(p, cal, {
+        remoteId: r.remote_id,
+        etag: r.etag,
+        kind: r.kind,
+        payload: r.payload,
+      });
     } catch (err) {
       if (err instanceof ConflictError) {
         await this.syncCalendar({ ...cal, cursor: null }).catch(() => {});
@@ -422,10 +457,14 @@ export class CalendarService {
   }
 
   updateEvent(resourceId: string, patch: EventPatch) {
-    return this.write(resourceId, (p, cal, r) => p.update({ remoteId: cal.remote_id, cursor: cal.cursor }, r, patch));
+    return this.write(resourceId, (p, cal, r) =>
+      p.update({ remoteId: cal.remote_id, cursor: cal.cursor }, r, patch),
+    );
   }
 
   deleteEvent(resourceId: string, del: EventDelete) {
-    return this.write(resourceId, (p, cal, r) => p.remove({ remoteId: cal.remote_id, cursor: cal.cursor }, r, del));
+    return this.write(resourceId, (p, cal, r) =>
+      p.remove({ remoteId: cal.remote_id, cursor: cal.cursor }, r, del),
+    );
   }
 }

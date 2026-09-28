@@ -55,9 +55,11 @@ export class Reminders {
   }
 
   lists(): string[] {
-    return (this.db.prepare('SELECT DISTINCT list FROM reminders ORDER BY list').all() as { list: string }[]).map(
-      (r) => r.list,
-    );
+    return (
+      this.db.prepare('SELECT DISTINCT list FROM reminders ORDER BY list').all() as {
+        list: string;
+      }[]
+    ).map((r) => r.list);
   }
 
   ingest(body: unknown): IngestResult {
@@ -71,7 +73,11 @@ export class Reminders {
         continue;
       }
       const list = r.data.list || 'Reminders';
-      items.push({ ...r.data, list, key: r.data.id || shortHash(list, r.data.title, r.data.created ?? '') });
+      items.push({
+        ...r.data,
+        list,
+        key: r.data.id || shortHash(list, r.data.title, r.data.created ?? ''),
+      });
     }
 
     const tx = this.db.transaction(() => {
@@ -99,16 +105,21 @@ export class Reminders {
       );
       // A board tick is done once the phone no longer reports that reminder as open.
       const open = new Set(items.filter((r) => !r.completed).map((r) => r.key));
-      const actions = this.db.prepare('SELECT reminder_id FROM reminder_actions').all() as { reminder_id: string }[];
+      const actions = this.db.prepare('SELECT reminder_id FROM reminder_actions').all() as {
+        reminder_id: string;
+      }[];
       for (const a of actions) {
-        if (!open.has(a.reminder_id)) this.db.prepare('DELETE FROM reminder_actions WHERE reminder_id = ?').run(a.reminder_id);
+        if (!open.has(a.reminder_id))
+          this.db.prepare('DELETE FROM reminder_actions WHERE reminder_id = ?').run(a.reminder_id);
       }
     });
     tx();
     setSetting(this.db, 'remindersLastIngest', Date.now());
     this.live.publish('reminders');
 
-    const complete = this.db.prepare('SELECT title, list, created FROM reminder_actions ORDER BY requested_at').all() as {
+    const complete = this.db
+      .prepare('SELECT title, list, created FROM reminder_actions ORDER BY requested_at')
+      .all() as {
       title: string;
       list: string;
       created: string | null;
@@ -117,9 +128,9 @@ export class Reminders {
   }
 
   requestComplete(id: string, done: boolean): boolean {
-    const r = this.db.prepare('SELECT id, title, list, created FROM reminders WHERE id = ?').get(id) as
-      | Pick<Row, 'id' | 'title' | 'list' | 'created'>
-      | undefined;
+    const r = this.db
+      .prepare('SELECT id, title, list, created FROM reminders WHERE id = ?')
+      .get(id) as Pick<Row, 'id' | 'title' | 'list' | 'created'> | undefined;
     if (!r) return false;
     if (done) {
       this.db
@@ -137,8 +148,10 @@ export class Reminders {
 
   register(app: FastifyInstance, auth: Auth) {
     app.post<{ Querystring: { token?: string } }>('/api/reminders/ingest', async (req, reply) => {
-      const header = req.headers.authorization ?? (req.query.token ? `Bearer ${req.query.token}` : undefined);
-      if (!auth.checkIngestToken(header)) return reply.code(401).send({ error: 'Bad or missing token' });
+      const header =
+        req.headers.authorization ?? (req.query.token ? `Bearer ${req.query.token}` : undefined);
+      if (!auth.checkIngestToken(header))
+        return reply.code(401).send({ error: 'Bad or missing token' });
       return { ok: true, ...this.ingest(req.body) };
     });
 
@@ -162,6 +175,8 @@ export class Reminders {
       lastIngest: getSetting<number>(this.db, 'remindersLastIngest') ?? null,
     }));
 
-    app.post('/api/reminders/token', { preHandler: auth.guard }, async () => ({ token: auth.rotateIngestToken() }));
+    app.post('/api/reminders/token', { preHandler: auth.guard }, async () => ({
+      token: auth.rotateIngestToken(),
+    }));
   }
 }

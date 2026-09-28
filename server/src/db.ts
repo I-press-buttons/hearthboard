@@ -107,8 +107,7 @@ function migrate(db: DB) {
 
 export function getSetting<T>(db: DB, key: string): T | undefined {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as
-    | { value: string }
-    | undefined;
+    { value: string } | undefined;
   return row ? (JSON.parse(row.value) as T) : undefined;
 }
 

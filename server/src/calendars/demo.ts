@@ -24,18 +24,31 @@ export class DemoProvider implements CalendarProvider {
 
   static seeded(now = new Date()): DemoProvider {
     const p = new DemoProvider();
-    for (const [cal, input] of demoEvents(now)) p.put(cal, buildIcs(input, `${crypto.randomUUID()}@demo`));
+    for (const [cal, input] of demoEvents(now))
+      p.put(cal, buildIcs(input, `${crypto.randomUUID()}@demo`));
     const trash = buildIcs(
       { title: 'Trash night', start: at(now, -7, 19), end: at(now, -7, 19.5), allDay: false },
       'trash-night@demo',
     );
-    p.put(DEMO_CALENDARS[0].remoteId, trash.replace('END:VEVENT', 'RRULE:FREQ=WEEKLY\r\nEND:VEVENT'));
+    p.put(
+      DEMO_CALENDARS[0].remoteId,
+      trash.replace('END:VEVENT', 'RRULE:FREQ=WEEKLY\r\nEND:VEVENT'),
+    );
     return p;
   }
 
   /** Add a raw iCalendar object (used for seeding recurring demo events). */
-  put(calendarRemoteId: string, ics: string, href = `${calendarRemoteId}${crypto.randomUUID()}.ics`): RemoteResource {
-    const res: RemoteResource = { remoteId: href, etag: `"${++this.version}"`, kind: 'ics', payload: ics };
+  put(
+    calendarRemoteId: string,
+    ics: string,
+    href = `${calendarRemoteId}${crypto.randomUUID()}.ics`,
+  ): RemoteResource {
+    const res: RemoteResource = {
+      remoteId: href,
+      etag: `"${++this.version}"`,
+      kind: 'ics',
+      payload: ics,
+    };
     this.store.get(calendarRemoteId)!.set(href, res);
     return res;
   }
@@ -46,8 +59,14 @@ export class DemoProvider implements CalendarProvider {
 
   async sync(cal: CalendarRef): Promise<SyncResult> {
     const cursor = String(this.version);
-    if (cal.cursor === cursor) return { full: false, upserts: [], deletes: [], cursor, unchanged: true };
-    return { full: true, upserts: [...(this.store.get(cal.remoteId)?.values() ?? [])], deletes: [], cursor };
+    if (cal.cursor === cursor)
+      return { full: false, upserts: [], deletes: [], cursor, unchanged: true };
+    return {
+      full: true,
+      upserts: [...(this.store.get(cal.remoteId)?.values() ?? [])],
+      deletes: [],
+      cursor,
+    };
   }
 
   async create(cal: CalendarRef, input: Omit<EventInput, 'calendarId'>): Promise<RemoteResource> {

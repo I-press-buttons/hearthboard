@@ -104,28 +104,44 @@ export class Photos {
     return items;
   }
 
-  async next(source: 'folder' | 'synology', folder: string, albumId: string): Promise<PhotoRef | null> {
+  async next(
+    source: 'folder' | 'synology',
+    folder: string,
+    albumId: string,
+  ): Promise<PhotoRef | null> {
     if (source === 'synology') {
       if (!albumId) throw new HttpError(400, 'Pick an album in the widget settings.');
       const items = await this.albumItems(albumId);
-      const it = this.deck(`s:${albumId}`).next(items, (a, b) => (a as SynoItem).id === (b as SynoItem).id) as
-        | SynoItem
-        | undefined;
+      const it = this.deck(`s:${albumId}`).next(
+        items,
+        (a, b) => (a as SynoItem).id === (b as SynoItem).id,
+      ) as SynoItem | undefined;
       if (!it) return null;
       return {
         id: 's.' + encode({ u: it.unitId, k: it.cacheKey }),
-        caption: it.time ? new Date(it.time * 1000).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : '',
+        caption: it.time
+          ? new Date(it.time * 1000).toLocaleDateString(undefined, {
+              month: 'long',
+              year: 'numeric',
+            })
+          : '',
       };
     }
     const files = await this.folder.list(folder);
     const rel = this.deck(`f:${folder}`).next(files, (a, b) => a === b) as string | undefined;
     if (!rel) return null;
-    return { id: 'f.' + encode(rel), caption: path.basename(path.dirname(rel)) === '.' ? '' : path.basename(path.dirname(rel)) };
+    return {
+      id: 'f.' + encode(rel),
+      caption: path.basename(path.dirname(rel)) === '.' ? '' : path.basename(path.dirname(rel)),
+    };
   }
 
   /** Resized JPEG for a photo id, from the disk cache when possible. */
   async image(id: string, w: number, h: number): Promise<Buffer> {
-    const file = path.join(this.cacheDir, crypto.createHash('sha1').update(`${id}:${w}x${h}`).digest('hex') + '.jpg');
+    const file = path.join(
+      this.cacheDir,
+      crypto.createHash('sha1').update(`${id}:${w}x${h}`).digest('hex') + '.jpg',
+    );
     try {
       return await fs.readFile(file);
     } catch {
@@ -168,7 +184,8 @@ export class Photos {
       names.map(async (n) => ({ n, t: (await fs.stat(path.join(this.cacheDir, n))).mtimeMs })),
     );
     stats.sort((a, b) => a.t - b.t);
-    for (const s of stats.slice(0, names.length - max)) await fs.rm(path.join(this.cacheDir, s.n), { force: true });
+    for (const s of stats.slice(0, names.length - max))
+      await fs.rm(path.join(this.cacheDir, s.n), { force: true });
   }
 
   register(app: FastifyInstance, auth: Auth) {
@@ -184,7 +201,11 @@ export class Photos {
     app.get<{ Params: { id: string }; Querystring: { w?: string; h?: string } }>(
       '/api/photos/img/:id',
       async (req, reply) => {
-        const buf = await this.image(req.params.id, bucket(req.query.w, 1280), bucket(req.query.h, 1280));
+        const buf = await this.image(
+          req.params.id,
+          bucket(req.query.w, 1280),
+          bucket(req.query.h, 1280),
+        );
         reply.header('cache-control', 'public, max-age=86400').type('image/jpeg');
         return buf;
       },
@@ -198,7 +219,9 @@ export class Photos {
           available: await this.folder.available(),
           count: (await this.folder.list('').catch(() => [])).length,
         },
-        synology: s ? { configured: true, url: s.url, username: s.username, insecure: !!s.insecure } : { configured: false },
+        synology: s
+          ? { configured: true, url: s.url, username: s.username, insecure: !!s.insecure }
+          : { configured: false },
       };
     });
 

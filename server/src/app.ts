@@ -42,10 +42,18 @@ export interface BuildOptions {
 
 export async function buildApp(config: Config, opts: BuildOptions = {}): Promise<AppContext> {
   const background = opts.background ?? true;
-  const app = Fastify({ logger: opts.logger ?? false, trustProxy: true, bodyLimit: 5 * 1024 * 1024 });
-  const db = openDb(config.dataDir === ':memory:' ? ':memory:' : path.join(config.dataDir, 'hearthboard.db'));
+  const app = Fastify({
+    logger: opts.logger ?? false,
+    trustProxy: true,
+    bodyLimit: 5 * 1024 * 1024,
+  });
+  const db = openDb(
+    config.dataDir === ':memory:' ? ':memory:' : path.join(config.dataDir, 'hearthboard.db'),
+  );
   const secrets =
-    config.dataDir === ':memory:' ? new SecretBox(config.secret ?? 'test-secret') : SecretBox.fromConfig(config.secret, config.dataDir);
+    config.dataDir === ':memory:'
+      ? new SecretBox(config.secret ?? 'test-secret')
+      : SecretBox.fromConfig(config.secret, config.dataDir);
   const live = new LiveHub();
   const auth = new Auth(db, config.adminPin);
 
@@ -59,8 +67,19 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   const checklists = new Checklists(db, live);
   const reminders = new Reminders(db, live);
   const quotes = new Quotes(db, live);
-  const photos = new Photos(db, secrets, live, photosDir, config.dataDir === ':memory:' ? '/tmp/hearthboard-test' : config.dataDir);
-  const calendars = new CalendarService(db, secrets, live, opts.providerFactory ?? defaultProviderFactory);
+  const photos = new Photos(
+    db,
+    secrets,
+    live,
+    photosDir,
+    config.dataDir === ':memory:' ? '/tmp/hearthboard-test' : config.dataDir,
+  );
+  const calendars = new CalendarService(
+    db,
+    secrets,
+    live,
+    opts.providerFactory ?? defaultProviderFactory,
+  );
 
   await app.register(cookie);
   await app.register(websocket);
@@ -93,7 +112,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
 
   // Serve the built web app; client-side routes fall back to index.html.
   if (fs.existsSync(path.join(config.webDir, 'index.html'))) {
-    await app.register(fastifyStatic, { root: config.webDir, wildcard: false });
+    await app.register(fastifyStatic, { root: config.webDir });
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api/') && req.url !== '/ws') {
         return reply.sendFile('index.html');

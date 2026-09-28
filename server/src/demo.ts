@@ -18,7 +18,11 @@ const SCENES: [string, string, string][] = [
 export async function ensureDemoPhotos(dir: string) {
   await fs.mkdir(path.join(dir, 'Vacation'), { recursive: true });
   for (const [i, [name, a, b]] of SCENES.entries()) {
-    const file = path.join(dir, i < 3 ? 'Vacation' : '', `${name.toLowerCase().replace(/\s+/g, '-')}.jpg`);
+    const file = path.join(
+      dir,
+      i < 3 ? 'Vacation' : '',
+      `${name.toLowerCase().replace(/\s+/g, '-')}.jpg`,
+    );
     try {
       await fs.access(file);
       continue;
@@ -31,13 +35,17 @@ export async function ensureDemoPhotos(dir: string) {
       <rect width="1600" height="1200" fill="url(#g)"/>
       <circle cx="${300 + i * 180}" cy="${320 + (i % 3) * 90}" r="140" fill="#fff" fill-opacity="0.35"/>
       <path d="M0 900 L400 600 L700 820 L1050 520 L1600 900 L1600 1200 L0 1200 Z" fill="#000" fill-opacity="0.25"/>
-      <text x="80" y="1120" font-family="sans-serif" font-size="72" fill="#fff" fill-opacity="0.9">${name}</text>
+      <text x="800" y="1080" text-anchor="middle" font-family="sans-serif" font-size="64" fill="#fff" fill-opacity="0.85">${name}</text>
     </svg>`;
     await sharp(Buffer.from(svg)).jpeg({ quality: 85 }).toFile(file);
   }
 }
 
-export async function seedDemo(opts: { calendars: CalendarService; reminders: Reminders; checklists: Checklists }) {
+export async function seedDemo(opts: {
+  calendars: CalendarService;
+  reminders: Reminders;
+  checklists: Checklists;
+}) {
   if (!opts.calendars.listAccounts().some((a) => a.provider === 'demo')) {
     await opts.calendars.addAccount('demo', 'Demo family', null);
   }

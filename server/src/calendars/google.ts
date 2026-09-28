@@ -67,7 +67,9 @@ export function extractAuthCode(input: string): string | null {
   if (!s) return null;
   if (!/[?&]code=/.test(s)) return /^[\w\-./]+$/.test(s) ? s : null;
   try {
-    return new URL(s.startsWith('http') ? s : `http://x/${s.replace(/^\/?/, '')}`).searchParams.get('code');
+    return new URL(s.startsWith('http') ? s : `http://x/${s.replace(/^\/?/, '')}`).searchParams.get(
+      'code',
+    );
   } catch {
     return null;
   }
@@ -91,10 +93,16 @@ export async function exchangeGoogleCode(
       grant_type: 'authorization_code',
     }),
   });
-  const body = (await res.json()) as { refresh_token?: string; error?: string; error_description?: string };
+  const body = (await res.json()) as {
+    refresh_token?: string;
+    error?: string;
+    error_description?: string;
+  };
   if (!res.ok || !body.refresh_token) {
     throw new Error(
-      body.error_description ?? body.error ?? 'Google did not return a refresh token. Remove the app from your Google account permissions and try again.',
+      body.error_description ??
+        body.error ??
+        'Google did not return a refresh token. Remove the app from your Google account permissions and try again.',
     );
   }
   return body.refresh_token;
@@ -125,7 +133,10 @@ export function googleOccurrence(payload: string): Occurrence | null {
 
 function times(start: string, end: string, allDay: boolean): { start: GTime; end: GTime } {
   return allDay
-    ? { start: { date: start.slice(0, 10), dateTime: null }, end: { date: end.slice(0, 10), dateTime: null } }
+    ? {
+        start: { date: start.slice(0, 10), dateTime: null },
+        end: { date: end.slice(0, 10), dateTime: null },
+      }
     : {
         start: { dateTime: new Date(start).toISOString(), date: null },
         end: { dateTime: new Date(end).toISOString(), date: null },
@@ -182,7 +193,12 @@ export class GoogleProvider implements CalendarProvider {
         grant_type: 'refresh_token',
       }),
     });
-    const body = (await res.json()) as { access_token?: string; expires_in?: number; error?: string; error_description?: string };
+    const body = (await res.json()) as {
+      access_token?: string;
+      expires_in?: number;
+      error?: string;
+      error_description?: string;
+    };
     if (!res.ok || !body.access_token) {
       throw new AuthError(
         body.error === 'invalid_grant'
@@ -195,7 +211,11 @@ export class GoogleProvider implements CalendarProvider {
     return this.accessToken;
   }
 
-  private async api<T>(path: string, init: RequestInit = {}, retry = true): Promise<{ status: number; body: T | null }> {
+  private async api<T>(
+    path: string,
+    init: RequestInit = {},
+    retry = true,
+  ): Promise<{ status: number; body: T | null }> {
     const res = await this.f(API + path, {
       ...init,
       headers: {
@@ -214,7 +234,8 @@ export class GoogleProvider implements CalendarProvider {
     const text = await res.text();
     const body = text ? (JSON.parse(text) as T) : null;
     if (!res.ok) {
-      const msg = (body as { error?: { message?: string } } | null)?.error?.message ?? res.statusText;
+      const msg =
+        (body as { error?: { message?: string } } | null)?.error?.message ?? res.statusText;
       if (res.status === 403 || res.status === 401) throw new AuthError(`Google: ${msg}`);
       if (res.status === 404 && init.method === 'DELETE') return { status: 404, body: null };
       throw new Error(`Google Calendar API ${res.status}: ${msg}`);
@@ -228,7 +249,14 @@ export class GoogleProvider implements CalendarProvider {
     do {
       const q = new URLSearchParams({ maxResults: '250', ...(pageToken ? { pageToken } : {}) });
       const { body } = await this.api<{
-        items?: { id: string; summary: string; summaryOverride?: string; backgroundColor?: string; accessRole: string; deleted?: boolean }[];
+        items?: {
+          id: string;
+          summary: string;
+          summaryOverride?: string;
+          backgroundColor?: string;
+          accessRole: string;
+          deleted?: boolean;
+        }[];
         nextPageToken?: string;
       }>(`/users/me/calendarList?${q}`);
       for (const c of body?.items ?? []) {
@@ -252,16 +280,22 @@ export class GoogleProvider implements CalendarProvider {
     let pageToken: string | undefined;
     let cursor: string | null = null;
     do {
-      const q = new URLSearchParams({ singleEvents: 'true', showDeleted: 'true', maxResults: '2500' });
+      const q = new URLSearchParams({
+        singleEvents: 'true',
+        showDeleted: 'true',
+        maxResults: '2500',
+      });
       if (pageToken) q.set('pageToken', pageToken);
       if (cal.cursor) q.set('syncToken', cal.cursor);
       else {
         q.set('timeMin', window.start.toISOString());
         q.set('timeMax', window.end.toISOString());
       }
-      const { status, body } = await this.api<{ items?: GEvent[]; nextPageToken?: string; nextSyncToken?: string }>(
-        `/calendars/${encodeURIComponent(cal.remoteId)}/events?${q}`,
-      );
+      const { status, body } = await this.api<{
+        items?: GEvent[];
+        nextPageToken?: string;
+        nextSyncToken?: string;
+      }>(`/calendars/${encodeURIComponent(cal.remoteId)}/events?${q}`);
       if (status === 410) return this.sync({ ...cal, cursor: null }, window); // sync token expired
       for (const e of body?.items ?? []) {
         if (e.status === 'cancelled') deletes.push(e.id);
@@ -270,7 +304,13 @@ export class GoogleProvider implements CalendarProvider {
       pageToken = body?.nextPageToken;
       cursor = body?.nextSyncToken ?? cursor;
     } while (pageToken);
-    return { full, upserts, deletes, cursor, unchanged: !full && !upserts.length && !deletes.length };
+    return {
+      full,
+      upserts,
+      deletes,
+      cursor,
+      unchanged: !full && !upserts.length && !deletes.length,
+    };
   }
 
   async create(cal: CalendarRef, input: Omit<EventInput, 'calendarId'>): Promise<RemoteResource> {
@@ -280,10 +320,13 @@ export class GoogleProvider implements CalendarProvider {
       description: input.description ?? undefined,
       ...times(input.start, input.end, input.allDay),
     };
-    const { body: e } = await this.api<GEvent>(`/calendars/${encodeURIComponent(cal.remoteId)}/events`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
+    const { body: e } = await this.api<GEvent>(
+      `/calendars/${encodeURIComponent(cal.remoteId)}/events`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    );
     return toResource(e!);
   }
 
@@ -293,11 +336,17 @@ export class GoogleProvider implements CalendarProvider {
     if (patch.scope === 'series' && existing.recurringEventId) {
       const masterId = existing.recurringEventId;
       const { body: master } = await this.api<GEvent>(`${calPath}/${encodeURIComponent(masterId)}`);
-      const body: Record<string, unknown> = googlePatchBody(master!, { ...patch, start: undefined, end: undefined });
+      const body: Record<string, unknown> = googlePatchBody(master!, {
+        ...patch,
+        start: undefined,
+        end: undefined,
+      });
       if (patch.start && master?.start) {
         const cur = googleOccurrence(res.payload)!;
         const delta = Date.parse(patch.start) - Date.parse(cur.start);
-        const dur = patch.end ? Date.parse(patch.end) - Date.parse(patch.start) : Date.parse(cur.end) - Date.parse(cur.start);
+        const dur = patch.end
+          ? Date.parse(patch.end) - Date.parse(patch.start)
+          : Date.parse(cur.end) - Date.parse(cur.start);
         if (master.start.date) {
           const days = Math.round(delta / 86_400_000);
           const start = addDays(master.start.date, days);
@@ -306,7 +355,10 @@ export class GoogleProvider implements CalendarProvider {
         } else {
           const start = Date.parse(master.start.dateTime!) + delta;
           body.start = { dateTime: new Date(start).toISOString(), timeZone: master.start.timeZone };
-          body.end = { dateTime: new Date(start + dur).toISOString(), timeZone: master.end?.timeZone ?? master.start.timeZone };
+          body.end = {
+            dateTime: new Date(start + dur).toISOString(),
+            timeZone: master.end?.timeZone ?? master.start.timeZone,
+          };
         }
       }
       await this.api(`${calPath}/${encodeURIComponent(masterId)}`, {
@@ -328,10 +380,13 @@ export class GoogleProvider implements CalendarProvider {
     const existing = JSON.parse(res.payload) as GEvent;
     const series = del.scope === 'series' && existing.recurringEventId;
     const id = series ? existing.recurringEventId! : existing.id;
-    await this.api(`/calendars/${encodeURIComponent(cal.remoteId)}/events/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers: !series && res.etag ? { 'if-match': res.etag } : {},
-    });
+    await this.api(
+      `/calendars/${encodeURIComponent(cal.remoteId)}/events/${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+        headers: !series && res.etag ? { 'if-match': res.etag } : {},
+      },
+    );
     return series ? 'resync' : null;
   }
 }

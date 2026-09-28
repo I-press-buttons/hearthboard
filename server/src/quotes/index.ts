@@ -8,7 +8,10 @@ import type { Auth } from '../auth';
 import verses from './data/verses-kjv.json' with { type: 'json' };
 import quotes from './data/quotes.json' with { type: 'json' };
 
-const VERSES = (verses as [string, string][]).map(([text, source]) => ({ text, source: `${source} (KJV)` }));
+const VERSES = (verses as [string, string][]).map(([text, source]) => ({
+  text,
+  source: `${source} (KJV)`,
+}));
 const QUOTES = (quotes as [string, string][]).map(([text, source]) => ({ text, source }));
 
 export type QuoteMode = 'verse' | 'quote' | 'both' | 'custom';
@@ -48,7 +51,13 @@ export class Quotes {
   current(mode: QuoteMode, rotate: 'daily' | 'hourly', now = new Date()): QuoteDTO {
     const period = periodIndex(now, rotate);
     let kind: QuoteDTO['kind'] =
-      mode === 'both' ? (period % 2 === 0 ? 'verse' : 'quote') : mode === 'custom' ? 'custom' : mode;
+      mode === 'both'
+        ? period % 2 === 0
+          ? 'verse'
+          : 'quote'
+        : mode === 'custom'
+          ? 'custom'
+          : mode;
     if (kind === 'custom') {
       const list = this.custom();
       if (list.length) return { kind, ...pick(list, period, 'custom') };
@@ -63,7 +72,9 @@ export class Quotes {
     app.get<{ Querystring: { mode?: QuoteMode; rotate?: 'daily' | 'hourly' } }>(
       '/api/quote',
       async (req) => {
-        const mode = (['verse', 'quote', 'both', 'custom'] as const).includes(req.query.mode as QuoteMode)
+        const mode = (['verse', 'quote', 'both', 'custom'] as const).includes(
+          req.query.mode as QuoteMode,
+        )
           ? (req.query.mode as QuoteMode)
           : 'verse';
         return this.current(mode, req.query.rotate === 'hourly' ? 'hourly' : 'daily');
@@ -75,7 +86,9 @@ export class Quotes {
     app.post('/api/quotes/custom', { preHandler: auth.guard }, async (req) => {
       const q = CustomQuote.parse(req.body);
       const id = crypto.randomBytes(6).toString('hex');
-      this.db.prepare('INSERT INTO quotes (id, text, source) VALUES (?, ?, ?)').run(id, q.text, q.source);
+      this.db
+        .prepare('INSERT INTO quotes (id, text, source) VALUES (?, ?, ?)')
+        .run(id, q.text, q.source);
       this.live.publish('quotes');
       return { id, ...q };
     });

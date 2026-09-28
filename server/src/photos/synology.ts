@@ -94,7 +94,9 @@ export class SynologyPhotos {
         this.sid = null;
         return this.call<T>(params, false);
       }
-      throw new Error(`Synology Photos API error ${body.error?.code ?? res.status} (${params.api})`);
+      throw new Error(
+        `Synology Photos API error ${body.error?.code ?? res.status} (${params.api})`,
+      );
     }
     return body.data as T;
   }
@@ -138,7 +140,13 @@ export class SynologyPhotos {
         if (i.type && i.type !== 'photo' && i.type !== 'live') continue;
         const t = i.additional?.thumbnail;
         if (!t) continue;
-        out.push({ id: i.id, filename: i.filename, time: i.time ?? null, unitId: t.unit_id, cacheKey: t.cache_key });
+        out.push({
+          id: i.id,
+          filename: i.filename,
+          time: i.time ?? null,
+          unitId: t.unit_id,
+          cacheKey: t.cache_key,
+        });
       }
       if (data.list.length < 500) break;
     }

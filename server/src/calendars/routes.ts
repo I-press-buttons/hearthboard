@@ -50,13 +50,19 @@ interface PendingGoogle {
   expires: number;
 }
 
-export function registerCalendarRoutes(app: FastifyInstance, svc: CalendarService, auth: Auth, config: Config) {
+export function registerCalendarRoutes(
+  app: FastifyInstance,
+  svc: CalendarService,
+  auth: Auth,
+  config: Config,
+) {
   const guard = { preHandler: auth.guard };
   const pending = new Map<string, PendingGoogle>();
 
   const finishGoogle = async (state: string, codeInput: string, name: string) => {
     const p = pending.get(state);
-    if (!p || p.expires < Date.now()) throw new HttpError(400, 'That sign-in link expired. Start again.');
+    if (!p || p.expires < Date.now())
+      throw new HttpError(400, 'That sign-in link expired. Start again.');
     const code = extractAuthCode(codeInput);
     if (!code) throw new HttpError(400, 'Could not find the code in what you pasted.');
     const refreshToken = await exchangeGoogleCode(p.clientId, p.clientSecret, code, p.redirectUri);
@@ -90,7 +96,9 @@ export function registerCalendarRoutes(app: FastifyInstance, svc: CalendarServic
 
   app.post('/api/accounts/google/start', guard, async (req) => {
     const body = GoogleStart.parse(req.body);
-    const redirectUri = config.publicUrl ? `${config.publicUrl}/api/google/callback` : GOOGLE_LOOPBACK_REDIRECT;
+    const redirectUri = config.publicUrl
+      ? `${config.publicUrl}/api/google/callback`
+      : GOOGLE_LOOPBACK_REDIRECT;
     const state = crypto.randomBytes(16).toString('base64url');
     pending.set(state, { ...body, redirectUri, expires: Date.now() + 15 * 60_000 });
     return { authUrl: googleAuthUrl(body.clientId.trim(), redirectUri, state), state, redirectUri };
@@ -107,7 +115,9 @@ export function registerCalendarRoutes(app: FastifyInstance, svc: CalendarServic
     async (req, reply) => {
       if (!auth.isAuthenticated(req)) return reply.redirect('/settings?google=login');
       if (req.query.error || !req.query.state || !req.query.code) {
-        return reply.redirect(`/settings?google=${encodeURIComponent(req.query.error ?? 'failed')}`);
+        return reply.redirect(
+          `/settings?google=${encodeURIComponent(req.query.error ?? 'failed')}`,
+        );
       }
       try {
         await finishGoogle(req.query.state, req.query.code, 'Google');
@@ -133,18 +143,24 @@ export function registerCalendarRoutes(app: FastifyInstance, svc: CalendarServic
     return svc.listAccounts();
   });
 
-  app.get<{ Querystring: { start?: string; end?: string; calendars?: string } }>('/api/events', async (req) => {
-    const start = new Date(req.query.start ?? Date.now());
-    const end = new Date(req.query.end ?? start.getTime() + 7 * 86_400_000);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw new HttpError(400, 'Bad date range');
-    if (end.getTime() - start.getTime() > 400 * 86_400_000) throw new HttpError(400, 'Range too large');
-    const ids = req.query.calendars?.split(',').filter(Boolean);
-    return svc.events(start, end, ids);
-  });
+  app.get<{ Querystring: { start?: string; end?: string; calendars?: string } }>(
+    '/api/events',
+    async (req) => {
+      const start = new Date(req.query.start ?? Date.now());
+      const end = new Date(req.query.end ?? start.getTime() + 7 * 86_400_000);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()))
+        throw new HttpError(400, 'Bad date range');
+      if (end.getTime() - start.getTime() > 400 * 86_400_000)
+        throw new HttpError(400, 'Range too large');
+      const ids = req.query.calendars?.split(',').filter(Boolean);
+      return svc.events(start, end, ids);
+    },
+  );
 
   app.post('/api/events', guard, async (req) => {
     const input = EventInput.parse(req.body);
-    if (Date.parse(input.end) < Date.parse(input.start)) throw new HttpError(400, 'The event ends before it starts.');
+    if (Date.parse(input.end) < Date.parse(input.start))
+      throw new HttpError(400, 'The event ends before it starts.');
     return { resourceId: await svc.createEvent(input) };
   });
 

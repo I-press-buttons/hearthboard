@@ -1,7 +1,18 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.avif', '.tif', '.tiff']);
+const IMAGE_EXT = new Set([
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.heic',
+  '.heif',
+  '.avif',
+  '.tif',
+  '.tiff',
+]);
 const HEIF_EXT = new Set(['.heic', '.heif']);
 const MAX_FILES = 100_000;
 const RESCAN_MS = 30 * 60_000;
@@ -83,7 +94,10 @@ export class FolderSource {
   async folders(): Promise<string[]> {
     try {
       const entries = await fs.readdir(this.root, { withFileTypes: true });
-      return entries.filter((e) => e.isDirectory() && !/^[@#.]/.test(e.name)).map((e) => e.name).sort();
+      return entries
+        .filter((e) => e.isDirectory() && !/^[@#.]/.test(e.name))
+        .map((e) => e.name)
+        .sort();
     } catch {
       return [];
     }

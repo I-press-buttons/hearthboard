@@ -176,7 +176,9 @@ function applyFields(vevent: ICAL.Component, patch: IcsPatch, withTimes: boolean
     const start = patch.start ?? timeKey(ev.startDate);
     const end =
       patch.end ??
-      (allDay ? timeKey(ev.endDate) : new Date(new Date(start).getTime() + oldDuration).toISOString());
+      (allDay
+        ? timeKey(ev.endDate)
+        : new Date(new Date(start).getTime() + oldDuration).toISOString());
     ev.startDate = toTime(start, allDay);
     ev.endDate = toTime(end, allDay);
   }
@@ -189,7 +191,9 @@ function findOccurrence(comp: ICAL.Component, recurrenceId: string) {
   for (const master of masters) {
     const ev = buildEvent(master, exceptions);
     if (!ev.isRecurring()) continue;
-    const target = new Date(recurrenceId.length === 10 ? recurrenceId + 'T00:00:00Z' : recurrenceId);
+    const target = new Date(
+      recurrenceId.length === 10 ? recurrenceId + 'T00:00:00Z' : recurrenceId,
+    );
     const it = ev.iterator();
     for (let i = 0, next = it.next(); next && i < MAX_ITERATIONS; i++, next = it.next()) {
       if (timeKey(next) === recurrenceId) {
@@ -251,7 +255,10 @@ export function patchIcs(ics: string, patch: IcsPatch): string {
   if (!target) {
     target = new ICAL.Component('vevent');
     for (const prop of master.getAllProperties()) {
-      if (['rrule', 'rdate', 'exdate', 'dtstart', 'dtend', 'duration', 'sequence'].includes(prop.name)) continue;
+      if (
+        ['rrule', 'rdate', 'exdate', 'dtstart', 'dtend', 'duration', 'sequence'].includes(prop.name)
+      )
+        continue;
       target.addProperty(ICAL.Property.fromString(prop.toICALString()));
     }
     const details = ev.getOccurrenceDetails(rid);
@@ -294,7 +301,11 @@ export function buildIcs(input: IcsInput, uid: string): string {
   ev.startDate = toTime(input.start, input.allDay);
   ev.endDate = toTime(input.end, input.allDay);
   vevent.updatePropertyWithValue('created', ICAL.Time.fromJSDate(new Date(), true));
-  applyFields(vevent, { title: input.title, location: input.location, description: input.description }, false);
+  applyFields(
+    vevent,
+    { title: input.title, location: input.location, description: input.description },
+    false,
+  );
   vevent.updatePropertyWithValue('sequence', 0);
   return cal.toString();
 }

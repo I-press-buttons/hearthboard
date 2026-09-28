@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
-export const WIDGET_TYPES = ['clock', 'calendar', 'reminders', 'photo', 'quote', 'checklist'] as const;
+export const WIDGET_TYPES = [
+  'clock',
+  'calendar',
+  'reminders',
+  'photo',
+  'quote',
+  'checklist',
+] as const;
 export const WidgetType = z.enum(WIDGET_TYPES);
 export type WidgetType = z.infer<typeof WidgetType>;
 
@@ -10,7 +17,13 @@ export const ClockConfig = z.object({
   showDate: z.boolean().default(true),
 });
 
-export const CALENDAR_VIEWS = ['dayGridMonth', 'timeGridWeek', 'timeGridDay', 'listWeek', 'agenda'] as const;
+export const CALENDAR_VIEWS = [
+  'dayGridMonth',
+  'timeGridWeek',
+  'timeGridDay',
+  'listWeek',
+  'agenda',
+] as const;
 export const CalendarConfig = z.object({
   view: z.enum(CALENDAR_VIEWS).default('dayGridMonth'),
   /** Calendar ids to show; empty = every enabled calendar. */
@@ -73,7 +86,10 @@ export function parseWidgetConfig<T extends WidgetType>(type: T, raw: unknown): 
 }
 
 /** Default grid size (in board cells) for newly added widgets. */
-export const WIDGET_DEFAULT_SIZE: Record<WidgetType, { w: number; h: number; minW: number; minH: number }> = {
+export const WIDGET_DEFAULT_SIZE: Record<
+  WidgetType,
+  { w: number; h: number; minW: number; minH: number }
+> = {
   clock: { w: 6, h: 3, minW: 2, minH: 1 },
   calendar: { w: 12, h: 9, minW: 4, minH: 3 },
   reminders: { w: 6, h: 6, minW: 3, minH: 2 },

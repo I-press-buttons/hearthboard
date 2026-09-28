@@ -36,7 +36,9 @@ export class Checklists {
   resetIfNewDay(now = new Date()): boolean {
     const today = localDate(now);
     const stale = this.db
-      .prepare('SELECT id FROM checklists WHERE reset_daily = 1 AND (last_reset IS NULL OR last_reset <> ?)')
+      .prepare(
+        'SELECT id FROM checklists WHERE reset_daily = 1 AND (last_reset IS NULL OR last_reset <> ?)',
+      )
       .all(today) as { id: string }[];
     if (!stale.length) return false;
     const tx = this.db.transaction(() => {
@@ -57,7 +59,8 @@ export class Checklists {
 
   get(id: string): ChecklistDTO | null {
     this.resetIfNewDay();
-    const l = this.db.prepare('SELECT * FROM checklists WHERE id = ?').get(id) as ListRow | undefined;
+    const l = this.db.prepare('SELECT * FROM checklists WHERE id = ?').get(id) as
+      ListRow | undefined;
     return l ? this.toDTO(l) : null;
   }
 
@@ -85,7 +88,9 @@ export class Checklists {
 
   addItem(checklistId: string, text: string) {
     const max = this.db
-      .prepare('SELECT COALESCE(MAX(position), -1) AS m FROM checklist_items WHERE checklist_id = ?')
+      .prepare(
+        'SELECT COALESCE(MAX(position), -1) AS m FROM checklist_items WHERE checklist_id = ?',
+      )
       .get(checklistId) as { m: number };
     const id = newId();
     this.db
@@ -98,8 +103,7 @@ export class Checklists {
   /** Create a starter list on a fresh install; returns its id. */
   ensureDefault(): string {
     const first = this.db.prepare('SELECT id FROM checklists ORDER BY rowid LIMIT 1').get() as
-      | { id: string }
-      | undefined;
+      { id: string } | undefined;
     if (first) return first.id;
     return this.create('Today', true, ['Make beds', 'Feed the dog', 'Pack lunches']).id;
   }
@@ -166,7 +170,9 @@ export class Checklists {
         if (patch.position !== undefined) set('position', patch.position);
         if (sets.length) {
           this.db
-            .prepare(`UPDATE checklist_items SET ${sets.join(', ')} WHERE id = ? AND checklist_id = ?`)
+            .prepare(
+              `UPDATE checklist_items SET ${sets.join(', ')} WHERE id = ? AND checklist_id = ?`,
+            )
             .run(...args, req.params.itemId, req.params.id);
           this.live.publish('checklists', req.params.id);
         }
@@ -187,7 +193,9 @@ export class Checklists {
     );
 
     app.post<{ Params: { id: string } }>('/api/checklists/:id/clear-done', guard, async (req) => {
-      this.db.prepare('DELETE FROM checklist_items WHERE checklist_id = ? AND done = 1').run(req.params.id);
+      this.db
+        .prepare('DELETE FROM checklist_items WHERE checklist_id = ? AND done = 1')
+        .run(req.params.id);
       this.live.publish('checklists', req.params.id);
       return this.get(req.params.id);
     });

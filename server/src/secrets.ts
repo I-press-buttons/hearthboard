@@ -32,7 +32,9 @@ export class SecretBox {
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', this.key, iv);
     const data = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]);
-    return ['v1', iv, cipher.getAuthTag(), data].map((p) => (typeof p === 'string' ? p : p.toString('base64url'))).join('.');
+    return ['v1', iv, cipher.getAuthTag(), data]
+      .map((p) => (typeof p === 'string' ? p : p.toString('base64url')))
+      .join('.');
   }
 
   open<T>(sealed: string): T {

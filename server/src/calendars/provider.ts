@@ -51,7 +51,9 @@ export interface CalendarProvider {
 
 /** The server rejected a write because the object changed since we last synced (HTTP 412). */
 export class ConflictError extends Error {
-  constructor(message = 'This event was changed somewhere else. The board has refreshed it; try again.') {
+  constructor(
+    message = 'This event was changed somewhere else. The board has refreshed it; try again.',
+  ) {
     super(message);
   }
 }

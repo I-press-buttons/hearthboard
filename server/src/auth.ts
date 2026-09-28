@@ -60,8 +60,7 @@ export class Auth {
     const token = req.cookies[COOKIE];
     if (!token) return false;
     const row = this.db.prepare('SELECT last_seen FROM sessions WHERE token = ?').get(token) as
-      | { last_seen: number }
-      | undefined;
+      { last_seen: number } | undefined;
     if (!row) return false;
     const now = Date.now();
     if (now - row.last_seen > SESSION_TTL_MS) {
@@ -84,7 +83,9 @@ export class Auth {
   private startSession(reply: FastifyReply) {
     const token = crypto.randomBytes(32).toString('base64url');
     const now = Date.now();
-    this.db.prepare('INSERT INTO sessions (token, created_at, last_seen) VALUES (?, ?, ?)').run(token, now, now);
+    this.db
+      .prepare('INSERT INTO sessions (token, created_at, last_seen) VALUES (?, ?, ?)')
+      .run(token, now, now);
     reply.setCookie(COOKIE, token, {
       path: '/',
       httpOnly: true,

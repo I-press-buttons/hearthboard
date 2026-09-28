@@ -24,18 +24,17 @@ export class Boards {
   ) {}
 
   list(): { id: string; name: string }[] {
-    return (this.db.prepare('SELECT data FROM boards ORDER BY rowid').all() as { data: string }[]).map(
-      (r) => {
-        const b = JSON.parse(r.data) as Board;
-        return { id: b.id, name: b.name };
-      },
-    );
+    return (
+      this.db.prepare('SELECT data FROM boards ORDER BY rowid').all() as { data: string }[]
+    ).map((r) => {
+      const b = JSON.parse(r.data) as Board;
+      return { id: b.id, name: b.name };
+    });
   }
 
   get(id: string): Board | null {
     const row = this.db.prepare('SELECT data FROM boards WHERE id = ?').get(id) as
-      | { data: string }
-      | undefined;
+      { data: string } | undefined;
     return row ? Board.parse(JSON.parse(row.data)) : null;
   }
 
@@ -81,7 +80,12 @@ export class Boards {
       const base = body.copyFrom ? this.get(body.copyFrom) : null;
       const id = crypto.randomBytes(4).toString('hex');
       return this.save(
-        Board.parse({ ...(base ?? {}), id, name: body.name || 'New board', widgets: base?.widgets ?? [] }),
+        Board.parse({
+          ...(base ?? {}),
+          id,
+          name: body.name || 'New board',
+          widgets: base?.widgets ?? [],
+        }),
       );
     });
 
@@ -89,7 +93,8 @@ export class Boards {
       '/api/boards/:id',
       { preHandler: auth.guard },
       async (req, reply) => {
-        if (this.list().length <= 1) return reply.code(400).send({ error: 'Keep at least one board.' });
+        if (this.list().length <= 1)
+          return reply.code(400).send({ error: 'Keep at least one board.' });
         this.db.prepare('DELETE FROM boards WHERE id = ?').run(req.params.id);
         this.live.publish('board', req.params.id);
         return { ok: true };

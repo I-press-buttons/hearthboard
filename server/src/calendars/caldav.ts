@@ -40,7 +40,8 @@ function normalizeColor(c: unknown): string | null {
 async function check(res: Response, what: string) {
   if (res.ok) return;
   if (res.status === 412) throw new ConflictError();
-  if (res.status === 401 || res.status === 403) throw new AuthError(`${what}: not allowed (${res.status})`);
+  if (res.status === 401 || res.status === 403)
+    throw new AuthError(`${what}: not allowed (${res.status})`);
   throw new Error(`${what} failed: HTTP ${res.status} ${res.statusText}`);
 }
 
@@ -121,7 +122,8 @@ export class CalDavProvider implements CalendarProvider {
       iCalString: ics,
     });
     await check(res, 'Creating the event');
-    const url = new URL(filename, cal.remoteId.endsWith('/') ? cal.remoteId : cal.remoteId + '/').href;
+    const url = new URL(filename, cal.remoteId.endsWith('/') ? cal.remoteId : cal.remoteId + '/')
+      .href;
     return (
       (await this.fetchOne(cal.remoteId, url)) ?? {
         remoteId: url,
