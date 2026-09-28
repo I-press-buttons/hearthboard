@@ -3,3 +3,6 @@ dist
 data
 package-lock.json
 server/src/quotes/data
+.e2e-data
+test-results
+playwright-report
