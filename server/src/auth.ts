@@ -27,9 +27,10 @@ export class Auth {
 
   constructor(
     private db: DB,
-    envPin: string | null,
+    initialPin: string | null,
   ) {
-    if (envPin) setSetting(db, 'adminPin', hashPin(envPin));
+    // Only a starting PIN: once one is saved, changes made in Settings stick across restarts.
+    if (initialPin && !this.pinSet()) setSetting(db, 'adminPin', hashPin(initialPin));
     if (!getSetting<string>(db, 'ingestToken')) this.rotateIngestToken();
   }
 

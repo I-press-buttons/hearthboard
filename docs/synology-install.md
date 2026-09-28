@@ -33,8 +33,6 @@ Container Manager → **Project** → **Create**:
 - **Path:** the `docker/hearthboard` folder from step 1
 - **Source:** _Create docker-compose.yml_, then paste the contents of
   [`docker-compose.yml`](../docker-compose.yml) and edit:
-  - `TZ`: your time zone, e.g. `America/New_York` or `Europe/London`
-    ([list](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones))
   - `PUID` / `PGID`: from step 2
   - the photos line: replace `YOUR_DSM_USER`. Synology Photos keeps your
     **Personal Space** in `/volume1/homes/<user>/Photos` and the **Shared
@@ -55,7 +53,9 @@ Click **Next** and **Done**. Container Manager pulls the image and starts it.
 ## 4. Open it
 
 - **Settings and layout:** `http://<nas-ip>:8080/edit` from a phone or PC. The
-  first visit asks you to choose an admin PIN.
+  first visit asks you to choose an admin PIN. Then check **Settings →
+  General**: the time zone starts as your phone's or PC's; change it there if
+  needed, along with how often calendars sync.
 - **The wall display:** `http://<nas-ip>:8080/` on the screen that hangs on the
   wall.
 

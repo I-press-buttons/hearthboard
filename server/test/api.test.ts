@@ -40,6 +40,84 @@ describe('auth', () => {
   });
 });
 
+describe('general settings', () => {
+  const originalTz = process.env.TZ;
+  afterEach(() => {
+    process.env.TZ = originalTz;
+  });
+
+  it('are admin-only and fall back to the environment until saved', async () => {
+    app = await testApp({ syncIntervalSec: 90, publicUrl: null });
+    expect((await app.inject('GET', '/api/system')).status).toBe(401);
+    await app.login();
+    expect((await app.inject('GET', '/api/system')).body).toEqual({
+      timeZone: originalTz,
+      syncIntervalSec: 90,
+      publicUrl: null,
+    });
+  });
+
+  it('saves time zone, sync interval and public address, and they survive a restart', async () => {
+    app = await testApp();
+    await app.login();
+    const res = await app.inject('PUT', '/api/system', {
+      timeZone: 'Europe/London',
+      syncIntervalSec: 300,
+      publicUrl: 'https://board.example.synology.me/',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      timeZone: 'Europe/London',
+      syncIntervalSec: 300,
+      publicUrl: 'https://board.example.synology.me',
+    });
+    expect(process.env.TZ).toBe('Europe/London');
+
+    // Google sign-in now redirects to the saved address.
+    const start = await app.inject('POST', '/api/accounts/google/start', {
+      clientId: 'client-id-1234',
+      clientSecret: 'secret',
+    });
+    expect(start.body.redirectUri).toBe('https://board.example.synology.me/api/google/callback');
+
+    // Clearing the address goes back to copy-and-paste sign-in.
+    expect((await app.inject('PUT', '/api/system', { publicUrl: '' })).body.publicUrl).toBeNull();
+
+    // Saved values beat the environment on the next start.
+    const dataDir = app.config.dataDir;
+    await app.app.close();
+    app = await testApp({ dataDir, timeZone: 'Asia/Tokyo', syncIntervalSec: 60 });
+    await app.login();
+    expect((await app.inject('GET', '/api/system')).body).toMatchObject({
+      timeZone: 'Europe/London',
+      syncIntervalSec: 300,
+      publicUrl: null,
+    });
+  });
+
+  it('rejects bad values', async () => {
+    app = await testApp();
+    await app.login();
+    expect((await app.inject('PUT', '/api/system', { timeZone: 'Mars/Olympus' })).status).toBe(400);
+    expect((await app.inject('PUT', '/api/system', { syncIntervalSec: 5 })).status).toBe(400);
+    expect((await app.inject('PUT', '/api/system', { publicUrl: 'not a url' })).status).toBe(400);
+  });
+});
+
+describe('admin PIN', () => {
+  it('uses the environment PIN only until one is chosen, so GUI changes survive restarts', async () => {
+    app = await testApp({ adminPin: '2468' });
+    await app.login('2468');
+    expect((await app.inject('POST', '/api/auth/pin', { pin: '1357' })).status).toBe(200);
+
+    const dataDir = app.config.dataDir;
+    await app.app.close();
+    app = await testApp({ dataDir, adminPin: '2468' });
+    expect((await app.inject('POST', '/api/auth/login', { pin: '2468' })).status).toBe(401);
+    expect((await app.inject('POST', '/api/auth/login', { pin: '1357' })).status).toBe(200);
+  });
+});
+
 describe('boards', () => {
   it('creates a default board and broadcasts saved layouts', async () => {
     app = await testApp();

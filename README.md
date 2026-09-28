@@ -37,9 +37,10 @@ phone or PC.
 ## Install on a Synology NAS
 
 The short version: in **Container Manager → Project → Create**, paste
-[`docker-compose.yml`](docker-compose.yml), then set your time zone, your
-`PUID`/`PGID` and the path to your photos. Then open
-`http://<nas-ip>:8080/edit`.
+[`docker-compose.yml`](docker-compose.yml), then set your `PUID`/`PGID` and
+the path to your photos. Then open `http://<nas-ip>:8080/edit`, choose a PIN,
+and set everything else (time zone, accounts, sync interval) under
+**Settings**.
 
 The step-by-step guide, including how to find your user ID and how to put the
 board on a Fire TV, Raspberry Pi or iPad, is in
@@ -64,27 +65,37 @@ environment.
 | `/`         | The wall display. Read-only, no login. `/?board=<id>` shows another board.                              |
 | `/edit`     | Arrange widgets: drag the ⠿ pill to move, drag edges to resize, ⚙︎ for board settings.                   |
 | `/calendar` | Full calendar: drag to move, stretch to resize, select a time range to create, click to edit or delete. |
-| `/settings` | Connect calendars, the reminders Shortcut, Synology Photos, checklists, custom verses and the PIN.      |
+| `/settings` | Time zone, sync interval, calendars, the reminders Shortcut, Synology Photos, checklists, verses, PIN.  |
 
 Anyone on your network can look at the board. Changing anything needs the
 admin PIN, which you choose on first visit.
 
 ## Configuration
 
-All settings are environment variables. The defaults suit the Docker image.
+Accounts and settings live in the web app under **Settings**, not in Docker:
 
-| Variable                    | Default         | Meaning                                                                                   |
-| --------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
-| `TZ`                        | `UTC`           | Your time zone, e.g. `America/Chicago`. Decides "today" and all-day events.               |
-| `PUID` / `PGID`             | `1000` / `1000` | User and group the server runs as (Synology: usually `1026` / `100`).                     |
-| `PORT`                      | `8080`          | HTTP port.                                                                                |
-| `HEARTHBOARD_DATA`          | `/data`         | Database, encryption key and image cache.                                                 |
-| `HEARTHBOARD_PHOTOS`        | `/photos`       | Photo folder (mount it read-only).                                                        |
-| `HEARTHBOARD_SYNC_INTERVAL` | `60`            | Seconds between calendar syncs (minimum 15).                                              |
-| `HEARTHBOARD_PIN`           | (none)          | Set the admin PIN from the environment instead of on first visit.                         |
-| `HEARTHBOARD_SECRET`        | (generated)     | Key for encrypting stored credentials. By default one is generated in `/data/secret.key`. |
-| `HEARTHBOARD_PUBLIC_URL`    | (none)          | HTTPS address of the board, if you have one. Lets Google sign-in redirect back directly.  |
-| `HEARTHBOARD_DEMO`          | (off)           | `1` loads sample calendars, reminders and photos.                                         |
+- **General:** time zone, how often calendars sync, and the public HTTPS
+  address used for Google sign-in.
+- **Calendars, Apple Reminders, Photos:** every account sign-in.
+- **Admin PIN:** change it or log out.
+
+They're stored in `/data` and survive container updates. The time zone
+starts as the one of the device you first set the PIN from.
+
+Docker only needs what the container itself requires:
+
+| Variable             | Default         | Meaning                                                                                   |
+| -------------------- | --------------- | ----------------------------------------------------------------------------------------- |
+| `PUID` / `PGID`      | `1000` / `1000` | User and group the server runs as (Synology: usually `1026` / `100`).                     |
+| `PORT`               | `8080`          | HTTP port.                                                                                |
+| `HEARTHBOARD_DATA`   | `/data`         | Database, encryption key and image cache.                                                 |
+| `HEARTHBOARD_PHOTOS` | `/photos`       | Photo folder (mount it read-only).                                                        |
+| `HEARTHBOARD_SECRET` | (generated)     | Key for encrypting stored credentials. By default one is generated in `/data/secret.key`. |
+| `HEARTHBOARD_DEMO`   | (off)           | `1` loads sample calendars, reminders and photos.                                         |
+
+Older compose files that still set `TZ`, `HEARTHBOARD_SYNC_INTERVAL`,
+`HEARTHBOARD_PUBLIC_URL` or `HEARTHBOARD_PIN` keep working: those values are
+used only until you change the setting in the web app, and can be removed.
 
 ## Themes and text sizes
 

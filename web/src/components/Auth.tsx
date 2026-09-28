@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import type { SystemSettingsDTO } from '@hearthboard/shared';
 import { api } from '../api';
+
+/** On first setup, start from this device's time zone instead of the image's UTC default. */
+async function adoptDeviceTimeZone() {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const current = await api.get<SystemSettingsDTO>('/api/system');
+  if (zone && current.timeZone === 'UTC' && zone !== 'UTC')
+    await api.put('/api/system', { timeZone: zone });
+}
 
 interface Status {
   authenticated: boolean;
@@ -34,6 +43,7 @@ function Login({ pinSet, onDone }: { pinSet: boolean; onDone: () => void }) {
     setBusy(true);
     try {
       await api.post(pinSet ? '/api/auth/login' : '/api/auth/setup', { pin });
+      if (!pinSet) await adoptDeviceTimeZone().catch(() => {});
       onDone();
     } catch (e) {
       setError((e as Error).message);

@@ -49,8 +49,9 @@ just add each account as a test user in step 1.3 first.
 If you reach Hearthboard over HTTPS with a real domain name (for example DSM's
 reverse proxy with a Let's Encrypt certificate for `board.you.synology.me`):
 
-1. Set `HEARTHBOARD_PUBLIC_URL: "https://board.you.synology.me"` in the compose
-   file.
+1. In Hearthboard, open **Settings → General**, enter
+   `https://board.you.synology.me` as the public HTTPS address (or click
+   **Use this address** when you've opened Settings through it), and **Save**.
 2. Make the OAuth client a **Web application** instead of a Desktop app, and
    add `https://board.you.synology.me/api/google/callback` as an authorized
    redirect URI.
