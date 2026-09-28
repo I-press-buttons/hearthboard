@@ -1,4 +1,11 @@
-import { RESOLUTION_PRESETS, type Board } from '@hearthboard/shared';
+import {
+  RESOLUTION_PRESETS,
+  TEXT_SIZES,
+  THEMES,
+  type Board,
+  type TextSizeId,
+  type ThemeId,
+} from '@hearthboard/shared';
 
 /** Keep widgets inside the grid after the grid size changes. */
 export function clampWidgets(b: Board): Board {
@@ -125,10 +132,16 @@ export function BoardSettings({
           <span>Theme</span>
           <select
             value={board.theme}
-            onChange={(e) => set({ theme: e.target.value as Board['theme'] })}
+            onChange={(e) => {
+              const theme = e.target.value as ThemeId;
+              set({ theme, accent: THEMES[theme].accent });
+            }}
           >
-            <option value="dark">Dark (best for TVs)</option>
-            <option value="light">Light</option>
+            {(Object.keys(THEMES) as ThemeId[]).map((id) => (
+              <option key={id} value={id}>
+                {THEMES[id].label}
+              </option>
+            ))}
           </select>
         </label>
         <label className="field">
@@ -140,6 +153,19 @@ export function BoardSettings({
           />
         </label>
       </div>
+      <label className="field">
+        <span>Text size</span>
+        <select
+          value={board.textSize}
+          onChange={(e) => set({ textSize: e.target.value as TextSizeId })}
+        >
+          {(Object.keys(TEXT_SIZES) as TextSizeId[]).map((id) => (
+            <option key={id} value={id}>
+              {TEXT_SIZES[id].label}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="field inline">
         <span>Dim the screen at night</span>
         <input

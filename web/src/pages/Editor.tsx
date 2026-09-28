@@ -249,6 +249,7 @@ export function Editor() {
               key={selectedWidget.id}
               widget={selectedWidget}
               onChange={(config) => updateWidget(selectedWidget.id, { config })}
+              onTextSize={(textSize) => updateWidget(selectedWidget.id, { textSize })}
               onDelete={() => {
                 update({
                   ...board,

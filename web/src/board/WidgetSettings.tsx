@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import {
   parseWidgetConfig,
+  TEXT_SIZES,
   type CalendarDTO,
   type ChecklistDTO,
+  type TextSizeId,
   type WidgetInstance,
   type WidgetType,
 } from '@hearthboard/shared';
@@ -208,12 +210,14 @@ function Field({
 export function WidgetSettings({
   widget,
   onChange,
+  onTextSize,
   onDelete,
   onDuplicate,
   onClose,
 }: {
   widget: WidgetInstance;
   onChange: (config: Config) => void;
+  onTextSize: (size: TextSizeId | undefined) => void;
   onDelete: () => void;
   onDuplicate: () => void;
   onClose: () => void;
@@ -239,6 +243,20 @@ export function WidgetSettings({
           onChange={(v) => onChange({ ...config, [f.key]: v })}
         />
       ))}
+      <label className="field">
+        <span>Text size</span>
+        <select
+          value={widget.textSize ?? ''}
+          onChange={(e) => onTextSize((e.target.value || undefined) as TextSizeId | undefined)}
+        >
+          <option value="">Same as board</option>
+          {(Object.keys(TEXT_SIZES) as TextSizeId[]).map((id) => (
+            <option key={id} value={id}>
+              {TEXT_SIZES[id].label}
+            </option>
+          ))}
+        </select>
+      </label>
       <div className="row" style={{ marginTop: 18 }}>
         <button className="btn" onClick={onDuplicate}>
           Duplicate

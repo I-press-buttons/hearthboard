@@ -13,6 +13,7 @@
   --chrome-bg: #10151c;
   --chrome-border: #232b36;
   --input-bg: #0b0f14;
+  --wash: rgba(255, 255, 255, 0.04);
   color-scheme: dark;
   font-family:
     'Inter',
@@ -25,16 +26,7 @@
     sans-serif;
 }
 
-.theme-light {
-  --bg: #f5f1ea;
-  --panel: rgba(255, 255, 255, 0.78);
-  --panel-solid: #ffffff;
-  --panel-border: rgba(40, 30, 20, 0.1);
-  --text: #1f1a14;
-  --muted: rgba(31, 26, 20, 0.62);
-  --faint: rgba(31, 26, 20, 0.38);
-  color-scheme: light;
-}
+/* Board colors come from shared/src/themes.ts and are set inline on .board-viewport. */
 
 * {
   box-sizing: border-box;
@@ -73,6 +65,7 @@ a {
   height: 100%;
   overflow: hidden;
   background: var(--bg);
+  color: var(--text);
 }
 
 .board-stage {
@@ -232,7 +225,12 @@ a {
 }
 
 .clock-time {
-  font-size: min(48cqh, 26cqw);
+  font-size: min(
+    calc(48cqh * var(--text-scale, 1)),
+    calc(26cqw * var(--text-scale, 1)),
+    54cqh,
+    29cqw
+  );
   font-weight: 300;
   letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
@@ -249,7 +247,12 @@ a {
 
 .clock-date {
   margin-top: 0.35em;
-  font-size: min(14cqh, 8cqw);
+  font-size: min(
+    calc(14cqh * var(--text-scale, 1)),
+    calc(8cqw * var(--text-scale, 1)),
+    16cqh,
+    8.5cqw
+  );
   color: var(--muted);
 }
 
@@ -394,9 +397,9 @@ a {
 .cal .fc {
   --fc-border-color: var(--panel-border);
   --fc-page-bg-color: transparent;
-  --fc-neutral-bg-color: rgba(255, 255, 255, 0.03);
+  --fc-neutral-bg-color: var(--wash);
   --fc-today-bg-color: color-mix(in srgb, var(--accent) 14%, transparent);
-  --fc-list-event-hover-bg-color: rgba(255, 255, 255, 0.06);
+  --fc-list-event-hover-bg-color: var(--wash);
   --fc-event-border-color: transparent;
   font-size: 0.85em;
 }

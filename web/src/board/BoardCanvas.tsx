@@ -1,8 +1,22 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import GridLayout, { type Layout } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
-import { WIDGET_DEFAULT_SIZE, type Board, type WidgetInstance } from '@hearthboard/shared';
+import {
+  WIDGET_DEFAULT_SIZE,
+  getTheme,
+  themeCssVars,
+  type Board,
+  type WidgetInstance,
+} from '@hearthboard/shared';
 
 export interface WidgetSize {
   width: number;
@@ -107,7 +121,12 @@ export function BoardCanvas({
     <div
       ref={viewport}
       className={`board-viewport theme-${board.theme} ${editable ? 'edit-mode' : ''}`}
-      style={{ ['--accent' as string]: board.accent }}
+      style={
+        {
+          ...themeCssVars(getTheme(board.theme)),
+          '--accent': board.accent,
+        } as CSSProperties
+      }
       onPointerDown={(e) => {
         if (editable && e.target === e.currentTarget) onSelect?.(null);
       }}

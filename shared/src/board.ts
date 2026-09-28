@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { WidgetType } from './widgets';
+import { DEFAULT_TEXT_SIZE, DEFAULT_THEME, TEXT_SIZE_IDS, THEME_IDS } from './themes';
 
 export const WidgetInstance = z.object({
   id: z.string().min(1).max(64),
@@ -9,6 +10,8 @@ export const WidgetInstance = z.object({
   w: z.number().int().min(1),
   h: z.number().int().min(1),
   config: z.record(z.unknown()).default({}),
+  /** Text size for just this widget; leave unset to follow the board. */
+  textSize: z.enum(TEXT_SIZE_IDS).optional().catch(undefined),
 });
 export type WidgetInstance = z.infer<typeof WidgetInstance>;
 
@@ -23,7 +26,10 @@ export const Board = z.object({
   cols: z.number().int().min(4).max(64).default(24),
   rows: z.number().int().min(4).max(64).default(16),
   margin: z.number().int().min(0).max(64).default(12),
-  theme: z.enum(['dark', 'light']).default('dark'),
+  /** Color theme; see themes.ts. Unknown keys fall back to the default. */
+  theme: z.enum(THEME_IDS).default(DEFAULT_THEME).catch(DEFAULT_THEME),
+  /** Text size for every widget on the board; see themes.ts. */
+  textSize: z.enum(TEXT_SIZE_IDS).default(DEFAULT_TEXT_SIZE).catch(DEFAULT_TEXT_SIZE),
   accent: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)

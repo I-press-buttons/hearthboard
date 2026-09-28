@@ -27,7 +27,7 @@ phone or PC.
 - **Everything moves and resizes.** Drag widgets around a grid, stretch them
   to any size, and make several boards (kitchen, kids' room, portrait tablet).
   The TV updates the moment you let go.
-- **Made for a wall:** dark theme, big type, optional night dimming, burn-in
+- **Made for a wall:** seven color themes, five text sizes (per board or per widget), optional night dimming, burn-in
   protection, reconnects by itself, and reloads nightly to pick up updates.
 
 | Layout editor (PC)                | Calendar page                         | Editor on a phone                             |
@@ -85,6 +85,21 @@ All settings are environment variables. The defaults suit the Docker image.
 | `HEARTHBOARD_SECRET`        | (generated)     | Key for encrypting stored credentials. By default one is generated in `/data/secret.key`. |
 | `HEARTHBOARD_PUBLIC_URL`    | (none)          | HTTPS address of the board, if you have one. Lets Google sign-in redirect back directly.  |
 | `HEARTHBOARD_DEMO`          | (off)           | `1` loads sample calendars, reminders and photos.                                         |
+
+## Themes and text sizes
+
+Pick a theme and a text size under **Layout → Board**. Each widget can also
+override the text size in its own settings.
+
+Themes: Ember (dark, the default), Linen (light), Midnight, Forest, Sunrise,
+Slate and High contrast. Text sizes: Extra small, Small, Medium, Large, Extra
+large.
+
+All of them live in [`shared/src/themes.ts`](shared/src/themes.ts). To change a
+theme, edit its colors there. To add one, copy an entry and give it a new key;
+it shows up in Board settings and is accepted by the API with no other changes.
+Text sizes work the same way (`scale: 1` is the original size). Boards that
+point at a theme or size you later remove fall back to the defaults.
 
 ## How it works
 

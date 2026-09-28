@@ -1,4 +1,4 @@
-import type { QuoteDTO } from '@hearthboard/shared';
+import { textScale, type QuoteDTO } from '@hearthboard/shared';
 import { api, qs } from '../api';
 import { useLiveQuery } from '../live';
 import type { WidgetProps } from './types';
@@ -10,7 +10,7 @@ export function fitFont(width: number, height: number, chars: number, scale = 1)
   return Math.max(4, Math.min(fs, height * 0.22, width * 0.09)) * scale;
 }
 
-export function QuoteWidget({ config, size }: WidgetProps<'quote'>) {
+export function QuoteWidget({ config, size, board, widget }: WidgetProps<'quote'>) {
   const { data } = useLiveQuery(
     ['quotes'],
     () => api.get<QuoteDTO>(`/api/quote${qs({ mode: config.mode, rotate: config.rotate })}`),
@@ -22,7 +22,7 @@ export function QuoteWidget({ config, size }: WidgetProps<'quote'>) {
     size.width,
     size.height,
     data.text.length + data.source.length / 2,
-    config.fontScale,
+    config.fontScale * textScale(board, widget),
   );
   return (
     <div className="quote" style={{ fontSize: fs }}>

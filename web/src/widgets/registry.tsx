@@ -1,5 +1,6 @@
 import {
   parseWidgetConfig,
+  textScale,
   type Board,
   type WidgetInstance,
   type WidgetType,
@@ -173,8 +174,12 @@ export function WidgetView({
   const def = WIDGETS[widget.type] as unknown as WidgetDef;
   const config = parseWidgetConfig(widget.type, widget.config);
   const Component = def.Component as React.ComponentType<WidgetProps<WidgetType>>;
+  const scale = textScale(board, widget);
   return (
-    <div className={`widget ${def.bare ? 'bare' : ''} ${selected ? 'selected' : ''}`}>
+    <div
+      className={`widget ${def.bare ? 'bare' : ''} ${selected ? 'selected' : ''}`}
+      style={{ fontSize: `${scale}em`, ['--text-scale' as string]: scale }}
+    >
       {mode === 'edit' && (
         <div className="drag-handle" title={`Drag to move (${def.label})`}>
           ⠿{(selected || size.width > 220) && ` ${def.icon} ${def.label}`}
