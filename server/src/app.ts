@@ -18,6 +18,7 @@ import { Photos } from './photos';
 import { Quotes } from './quotes';
 import { Reminders } from './reminders';
 import { SecretBox } from './secrets';
+import { applyTimeZone, SystemSettings } from './system';
 import { HttpError } from './util';
 
 export interface AppContext {
@@ -31,6 +32,7 @@ export interface AppContext {
   reminders: Reminders;
   photos: Photos;
   quotes: Quotes;
+  system: SystemSettings;
 }
 
 export interface BuildOptions {
@@ -56,6 +58,8 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
       : SecretBox.fromConfig(config.secret, config.dataDir);
   const live = new LiveHub();
   const auth = new Auth(db, config.adminPin);
+  const system = new SystemSettings(db, config);
+  applyTimeZone(system.get().timeZone);
 
   let photosDir = config.photosDir;
   if (config.demo && !fs.existsSync(photosDir)) {
@@ -105,7 +109,8 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   reminders.register(app, auth);
   quotes.register(app, auth);
   photos.register(app, auth);
-  registerCalendarRoutes(app, calendars, auth, config);
+  system.register(app, auth);
+  registerCalendarRoutes(app, calendars, auth, system);
 
   boards.ensureDefault(checklists.ensureDefault());
   if (config.demo) await seedDemo({ calendars, reminders, checklists });
@@ -122,14 +127,21 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   }
 
   if (background) {
-    calendars.start(config.syncIntervalSec);
+    calendars.start(system.get().syncIntervalSec);
     const stopReset = checklists.startDailyReset();
     app.addHook('onClose', async () => {
       calendars.stop();
       stopReset();
     });
   }
+  system.onChange((s) => {
+    applyTimeZone(s.timeZone);
+    calendars.reschedule(s.syncIntervalSec);
+    // All-day events and daily checklist resets follow the server's zone.
+    live.publish('events');
+    live.publish('checklists');
+  });
   app.addHook('onClose', async () => db.close());
 
-  return { app, db, live, auth, boards, calendars, checklists, reminders, photos, quotes };
+  return { app, db, live, auth, boards, calendars, checklists, reminders, photos, quotes, system };
 }

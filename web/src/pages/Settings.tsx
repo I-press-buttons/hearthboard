@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react';
-import type { AccountDTO, CalendarDTO, ChecklistDTO } from '@hearthboard/shared';
+import { useEffect, useState, type ReactNode } from 'react';
+import type { AccountDTO, CalendarDTO, ChecklistDTO, SystemSettingsDTO } from '@hearthboard/shared';
 import { api } from '../api';
 import { Modal, TopBar } from '../components/TopBar';
 import { useLiveQuery } from '../live';
@@ -39,6 +39,142 @@ function Card({ title, hint, children }: { title: string; hint?: ReactNode; chil
       {hint && <p className="hint">{hint}</p>}
       {children}
     </section>
+  );
+}
+
+// ---------------- general ----------------
+
+const SYNC_CHOICES: [number, string][] = [
+  [15, 'Every 15 seconds'],
+  [30, 'Every 30 seconds'],
+  [60, 'Every minute'],
+  [120, 'Every 2 minutes'],
+  [300, 'Every 5 minutes'],
+  [900, 'Every 15 minutes'],
+  [1800, 'Every 30 minutes'],
+  [3600, 'Every hour'],
+];
+
+function timeZones(current: string): string[] {
+  const zones = Intl.supportedValuesOf('timeZone');
+  return zones.includes(current) ? zones : [current, ...zones];
+}
+
+function GeneralCard() {
+  const [form, setForm] = useState<SystemSettingsDTO | null>(null);
+  const { busy, error, run } = useAction();
+  const [saved, setSaved] = useState(false);
+  const deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  useEffect(() => {
+    void run(async () => setForm(await api.get<SystemSettingsDTO>('/api/system')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!form)
+    return <Card title="General">{error ? <div className="error-text">{error}</div> : '…'}</Card>;
+
+  const set = (p: Partial<SystemSettingsDTO>) => {
+    setSaved(false);
+    setForm({ ...form, ...p });
+  };
+  const syncChoices = SYNC_CHOICES.some(([v]) => v === form.syncIntervalSec)
+    ? SYNC_CHOICES
+    : [...SYNC_CHOICES, [form.syncIntervalSec, `Every ${form.syncIntervalSec} seconds`] as const];
+
+  return (
+    <Card title="General">
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setSaved(false);
+          await run(async () => {
+            setForm(
+              await api.put<SystemSettingsDTO>('/api/system', {
+                ...form,
+                publicUrl: form.publicUrl?.trim() || null,
+              }),
+            );
+            setSaved(true);
+          });
+        }}
+      >
+        <label className="field">
+          <span>Time zone: decides “today”, all-day events and when checklists reset</span>
+          <div className="row">
+            <select
+              className="grow"
+              value={form.timeZone}
+              onChange={(e) => set({ timeZone: e.target.value })}
+            >
+              {timeZones(form.timeZone).map((z) => (
+                <option key={z} value={z}>
+                  {z.replace(/_/g, ' ')}
+                </option>
+              ))}
+            </select>
+            {deviceZone && deviceZone !== form.timeZone && (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => set({ timeZone: deviceZone })}
+              >
+                Use {deviceZone.replace(/_/g, ' ')}
+              </button>
+            )}
+          </div>
+        </label>
+        <label className="field">
+          <span>Check calendars for changes</span>
+          <select
+            value={form.syncIntervalSec}
+            onChange={(e) => set({ syncIntervalSec: Number(e.target.value) })}
+          >
+            {syncChoices.map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Public HTTPS address (optional)</span>
+          <div className="row">
+            <input
+              className="grow"
+              type="url"
+              placeholder="https://board.example.synology.me"
+              value={form.publicUrl ?? ''}
+              onChange={(e) => set({ publicUrl: e.target.value })}
+            />
+            {location.protocol === 'https:' && form.publicUrl !== location.origin && (
+              <button
+                type="button"
+                className="btn small"
+                onClick={() => set({ publicUrl: location.origin })}
+              >
+                Use this address
+              </button>
+            )}
+          </div>
+        </label>
+        <p className="hint">
+          If the board is reachable over HTTPS with a real name (for example DSM's reverse proxy
+          with a Let's Encrypt certificate), enter it here and Google sign-in comes straight back to
+          Settings. Add{' '}
+          <code>
+            {(form.publicUrl?.trim() || 'https://…').replace(/\/+$/, '')}/api/google/callback
+          </code>{' '}
+          as an authorized redirect URI of a <b>Web application</b> OAuth client. Leave it empty to
+          copy and paste the address instead.
+        </p>
+        {error && <div className="error-text">{error}</div>}
+        {saved && <div className="status-ok">Saved.</div>}
+        <button className="btn primary" disabled={busy}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      </form>
+    </Card>
   );
 }
 
@@ -153,7 +289,8 @@ function GoogleDialog({ onClose }: { onClose: () => void }) {
           <p className="hint">
             Google needs your own (free) OAuth client. Create a Google Cloud project, enable the
             Google Calendar API, then create an OAuth client of type <b>Desktop app</b> and paste
-            its ID and secret here. Set the consent screen's publishing status to{' '}
+            its ID and secret here (a <b>Web application</b> client if you set a public HTTPS
+            address under General). Set the consent screen's publishing status to{' '}
             <b>In production</b>, or Google signs the board out every 7 days. Full steps are in{' '}
             <code>docs/google-setup.md</code>.
           </p>
@@ -789,6 +926,7 @@ export function Settings() {
       <TopBar active="settings" />
       <div className="page">
         <div className="page-inner">
+          <GeneralCard />
           <CalendarsCard />
           <RemindersCard />
           <PhotosCard />
