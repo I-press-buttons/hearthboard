@@ -1,0 +1,160 @@
+import crypto from 'node:crypto';
+import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { EventDelete, EventInput, EventPatch } from '@hearthboard/shared';
+import type { Auth } from '../auth';
+import type { Config } from '../config';
+import { HttpError } from '../util';
+import { ICLOUD_CALDAV_URL } from './caldav';
+import {
+  exchangeGoogleCode,
+  extractAuthCode,
+  googleAuthUrl,
+  GOOGLE_LOOPBACK_REDIRECT,
+} from './google';
+import type { CalendarService } from './service';
+
+const CalDavBody = z.object({
+  name: z.string().min(1).max(100).default('iCloud'),
+  preset: z.enum(['icloud', 'custom']).default('icloud'),
+  serverUrl: z.string().url().optional(),
+  username: z.string().min(1),
+  password: z.string().min(1),
+});
+
+const GoogleStart = z.object({
+  clientId: z.string().min(10),
+  clientSecret: z.string().min(5),
+});
+
+const GoogleFinish = z.object({
+  state: z.string().min(1),
+  /** The authorization code, or the whole URL the browser ended on. */
+  code: z.string().min(1),
+  name: z.string().min(1).max(100).default('Google'),
+});
+
+const CalendarPatch = z.object({
+  enabled: z.boolean().optional(),
+  color: z
+    .string()
+    .regex(/^#[0-9a-fA-F]{6}$/)
+    .optional(),
+  name: z.string().min(1).max(100).optional(),
+});
+
+interface PendingGoogle {
+  clientId: string;
+  clientSecret: string;
+  redirectUri: string;
+  expires: number;
+}
+
+export function registerCalendarRoutes(app: FastifyInstance, svc: CalendarService, auth: Auth, config: Config) {
+  const guard = { preHandler: auth.guard };
+  const pending = new Map<string, PendingGoogle>();
+
+  const finishGoogle = async (state: string, codeInput: string, name: string) => {
+    const p = pending.get(state);
+    if (!p || p.expires < Date.now()) throw new HttpError(400, 'That sign-in link expired. Start again.');
+    const code = extractAuthCode(codeInput);
+    if (!code) throw new HttpError(400, 'Could not find the code in what you pasted.');
+    const refreshToken = await exchangeGoogleCode(p.clientId, p.clientSecret, code, p.redirectUri);
+    pending.delete(state);
+    return svc.addAccount('google', name, {
+      clientId: p.clientId,
+      clientSecret: p.clientSecret,
+      refreshToken,
+    });
+  };
+
+  app.get('/api/calendars', async () => svc.listCalendars());
+
+  app.patch<{ Params: { id: string } }>('/api/calendars/:id', guard, async (req) => {
+    svc.updateCalendar(req.params.id, CalendarPatch.parse(req.body));
+    return svc.listCalendars();
+  });
+
+  app.get('/api/accounts', guard, async () => svc.listAccounts());
+
+  app.post('/api/accounts/caldav', guard, async (req) => {
+    const body = CalDavBody.parse(req.body);
+    const serverUrl = body.preset === 'icloud' ? ICLOUD_CALDAV_URL : body.serverUrl;
+    if (!serverUrl) throw new HttpError(400, 'Enter the CalDAV server URL.');
+    return svc.addAccount('caldav', body.name, {
+      serverUrl,
+      username: body.username.trim(),
+      password: body.password.replace(/\s+/g, body.preset === 'icloud' ? '' : ' ').trim(),
+    });
+  });
+
+  app.post('/api/accounts/google/start', guard, async (req) => {
+    const body = GoogleStart.parse(req.body);
+    const redirectUri = config.publicUrl ? `${config.publicUrl}/api/google/callback` : GOOGLE_LOOPBACK_REDIRECT;
+    const state = crypto.randomBytes(16).toString('base64url');
+    pending.set(state, { ...body, redirectUri, expires: Date.now() + 15 * 60_000 });
+    return { authUrl: googleAuthUrl(body.clientId.trim(), redirectUri, state), state, redirectUri };
+  });
+
+  app.post('/api/accounts/google/finish', guard, async (req) => {
+    const body = GoogleFinish.parse(req.body);
+    return finishGoogle(body.state, body.code, body.name);
+  });
+
+  // Only reachable when HEARTHBOARD_PUBLIC_URL points at an HTTPS name Google accepts.
+  app.get<{ Querystring: { state?: string; code?: string; error?: string } }>(
+    '/api/google/callback',
+    async (req, reply) => {
+      if (!auth.isAuthenticated(req)) return reply.redirect('/settings?google=login');
+      if (req.query.error || !req.query.state || !req.query.code) {
+        return reply.redirect(`/settings?google=${encodeURIComponent(req.query.error ?? 'failed')}`);
+      }
+      try {
+        await finishGoogle(req.query.state, req.query.code, 'Google');
+        return reply.redirect('/settings?google=ok');
+      } catch (err) {
+        return reply.redirect(`/settings?google=${encodeURIComponent((err as Error).message)}`);
+      }
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>('/api/accounts/:id', guard, async (req) => {
+    svc.removeAccount(req.params.id);
+    return { ok: true };
+  });
+
+  app.post<{ Params: { id: string } }>('/api/accounts/:id/sync', guard, async (req) => {
+    await svc.syncAccount(req.params.id);
+    return svc.listAccounts().find((a) => a.id === req.params.id) ?? null;
+  });
+
+  app.post('/api/sync', guard, async () => {
+    await svc.syncAll();
+    return svc.listAccounts();
+  });
+
+  app.get<{ Querystring: { start?: string; end?: string; calendars?: string } }>('/api/events', async (req) => {
+    const start = new Date(req.query.start ?? Date.now());
+    const end = new Date(req.query.end ?? start.getTime() + 7 * 86_400_000);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw new HttpError(400, 'Bad date range');
+    if (end.getTime() - start.getTime() > 400 * 86_400_000) throw new HttpError(400, 'Range too large');
+    const ids = req.query.calendars?.split(',').filter(Boolean);
+    return svc.events(start, end, ids);
+  });
+
+  app.post('/api/events', guard, async (req) => {
+    const input = EventInput.parse(req.body);
+    if (Date.parse(input.end) < Date.parse(input.start)) throw new HttpError(400, 'The event ends before it starts.');
+    return { resourceId: await svc.createEvent(input) };
+  });
+
+  app.patch<{ Params: { id: string } }>('/api/events/:id', guard, async (req) => {
+    await svc.updateEvent(req.params.id, EventPatch.parse(req.body));
+    return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string } }>('/api/events/:id', guard, async (req) => {
+    await svc.deleteEvent(req.params.id, EventDelete.parse(req.body ?? {}));
+    return { ok: true };
+  });
+}
