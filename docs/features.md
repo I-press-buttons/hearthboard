@@ -16,6 +16,7 @@ other guides in this folder.
 | 8   | [Touch-screen mode](#8-touch-screen-mode-for-a-wall-tablet)     | Layout → ⚙︎ Board → Touch screen                    |
 | 9   | [Board schedules](#9-board-schedules)                           | Layout → ⚙︎ Board → Show another board at set times |
 | 10  | [Export and import layouts](#10-export-and-import-layouts)      | Layout → ⚙︎ Board → Layout file                     |
+| 11  | [Who can change a calendar](#11-who-can-change-a-calendar)      | Settings → Calendars (admins)                      |
 
 ---
 
@@ -337,6 +338,31 @@ The file is plain JSON:
 
 ---
 
+## 11. Who can change a calendar
+
+Connecting your iCloud or Google account brings in all of its calendars, personal and work ones
+included. So by default, **family members can see your calendars but can't change them**: adding,
+dragging, resizing, editing and deleting events is refused, for one-off and repeating events alike.
+
+An admin chooses which calendars the family may change:
+
+1. **Settings → Calendars** (admins only).
+2. Next to a calendar, switch on **Family can add and change events**. Switch it off again to
+   take that back.
+
+- It is **off for every calendar**, including ones you had before this option existed. After
+  updating, family members can't change events until an admin turns it on for the shared
+  calendars.
+- Admins can always change any calendar that isn't read-only.
+- Read-only calendars, such as subscribed feeds, can't be changed by anyone, so they have no
+  switch.
+- On the **Calendar** page, members are offered only the calendars they can add to, and can't
+  drag or stretch other events. A member who can change no calendar sees a note asking them to
+  check with an admin.
+- Wall displays that aren't signed in never change events.
+
+---
+
 ## For the curious: new API endpoints
 
 Everything above goes through the same JSON API the web app uses. "Public" means screens can
@@ -352,6 +378,7 @@ call it without signing in, like the rest of the display.
 | `POST /api/notes`             | signed in       | `{ "text", "color", "expiresInHours" }` (null = keep up)         |
 | `DELETE /api/notes/:id`       | author or admin | Take a note down                                                 |
 | `POST /api/accounts/ics`      | admin           | `{ "url", "name"? }` subscribe to a calendar feed                |
+| `PATCH /api/calendars/:id`    | admin           | `{ "membersCanEdit": true }` lets family members change events   |
 | `POST /api/boards`            | signed in       | `{ "layout": <exported file> }` imports a layout as a new board  |
 
 Touch-screen boards send an `X-Hearthboard-Board: <board id>` header. The server lets a request

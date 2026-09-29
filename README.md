@@ -13,7 +13,8 @@ phone or PC.
   together. Anything you add, drag, resize or edit on the board is saved back
   to the calendar it belongs to, and changes made on your phone show up within
   a minute. Repeating events work the way you'd expect ("only this one" or
-  "all events").
+  "all events"). Family members can only change the calendars an admin has
+  opened up to them ([who can edit what](#who-can-change-which-calendar)).
 - **Apple Reminders**, sent by a small iPhone Shortcut (Apple doesn't let
   servers read iCloud Reminders). Tick one off on the board and the Shortcut
   completes it on your phone.
@@ -114,14 +115,25 @@ Add everyone else under **Settings → People**. Each person gets:
   Members see and edit only their own boards; admins see everyone's, can help
   arrange them, and can hand a board to someone else ("Belongs to" in Board
   settings).
-- **A role.** _Members_ can arrange their boards, edit the calendar, tick
-  reminders and manage checklists and verses. _Admins_ can also add and remove
-  people, connect calendar accounts and Synology Photos, and see the reminders
-  token.
+- **A role.** _Members_ can arrange their boards, add and change events on the
+  calendars an admin has opened to the family (see below), tick reminders and
+  manage checklists and verses. _Admins_ can also add and remove people, connect
+  calendar accounts and Synology Photos, and see the reminders token.
 
 Calendars, reminders, photos, checklists, notes and the meal plan are shared by the household. To
 give someone a board with just their calendar, pick it under the calendar
 widget's settings.
+
+### Who can change which calendar
+
+Connecting an account brings in all of its calendars, which may include your
+personal or work ones. So **family members can look at every calendar you
+show, but can't add, move, edit or delete events on any of them until an admin
+allows it.** It's off by default for every calendar. To turn it on, go to
+**Settings → Calendars** and switch on **Family can add and change events**
+next to a calendar (for example a shared "Family" calendar). Admins can always
+change any calendar that isn't read-only, and nobody can change a read-only
+calendar such as a subscribed feed.
 
 ### Two-step sign-in
 
@@ -159,8 +171,9 @@ Accounts and settings live in the web app under **Settings**, not in Docker:
   sign-in.
 - **General** (admins): time zone, how often calendars sync, and the public
   HTTPS address used for Google sign-in.
-- **Calendars, Apple Reminders, Photos** (admins): every account sign-in, and
-  calendar subscriptions (holidays, school, sports).
+- **Calendars, Apple Reminders, Photos** (admins): every account sign-in,
+  calendar subscriptions (holidays, school, sports), and which calendars
+  family members can add and change events on.
 - **Checklists, Verses & quotes** (everyone).
 
 Notes and the meal plan live on the **Family** page.
