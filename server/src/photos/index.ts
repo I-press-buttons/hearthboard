@@ -8,7 +8,7 @@ import type { Auth } from '../auth';
 import { getSetting, setSetting, type DB } from '../db';
 import type { LiveHub } from '../live';
 import type { SecretBox } from '../secrets';
-import { errorMessage, HttpError } from '../util';
+import { errorMessage, HttpError, httpUrl } from '../util';
 import { FolderSource } from './folder';
 import { SynologyPhotos, type SynologySecret, type SynoItem } from './synology';
 
@@ -18,7 +18,7 @@ export interface PhotoRef {
 }
 
 const SynologyBody = z.object({
-  url: z.string().url(),
+  url: httpUrl(),
   username: z.string().min(1),
   password: z.string().min(1),
   insecure: z.boolean().default(false),

@@ -1,4 +1,5 @@
 import type { EventDelete, EventInput, EventPatch } from '@hearthboard/shared';
+import { requestTimeout } from '../util';
 import type { Occurrence } from './ics';
 import {
   AuthError,
@@ -85,6 +86,7 @@ export async function exchangeGoogleCode(
   const res = await f(TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    signal: requestTimeout(),
     body: new URLSearchParams({
       code,
       client_id: clientId,
@@ -186,6 +188,7 @@ export class GoogleProvider implements CalendarProvider {
     const res = await this.f(TOKEN_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      signal: requestTimeout(),
       body: new URLSearchParams({
         client_id: this.secret.clientId,
         client_secret: this.secret.clientSecret,
@@ -216,10 +219,13 @@ export class GoogleProvider implements CalendarProvider {
     init: RequestInit = {},
     retry = true,
   ): Promise<{ status: number; body: T | null }> {
+    // Fetch the token first so a slow sign-in doesn't use up this request's time.
+    const token = await this.token();
     const res = await this.f(API + path, {
       ...init,
+      signal: requestTimeout(),
       headers: {
-        authorization: `Bearer ${await this.token()}`,
+        authorization: `Bearer ${token}`,
         ...(init.body ? { 'content-type': 'application/json' } : {}),
         ...(init.headers ?? {}),
       },

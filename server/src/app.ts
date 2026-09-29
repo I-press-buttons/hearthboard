@@ -23,7 +23,7 @@ import { Reminders } from './reminders';
 import { SecretBox } from './secrets';
 import { applyTimeZone, SystemSettings } from './system';
 import { Users } from './users';
-import { HttpError } from './util';
+import { errorMessage, HttpError } from './util';
 import { Weather } from './weather';
 
 export interface AppContext {
@@ -131,7 +131,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     if (status && status < 500) return reply.code(status).send({ error: (err as Error).message });
     req.log.error(err);
     // The details (an upstream error, a file path) are for signed-in people only.
-    const message = req.user ? (err as Error).message : '';
+    const message = req.user ? errorMessage(err) : '';
     return reply.code(502).send({ error: message || 'Something went wrong' });
   });
 
