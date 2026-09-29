@@ -825,7 +825,7 @@ function QuotesCard() {
   return (
     <Card
       title="Verses & quotes"
-      hint="The verse widget uses a built-in list of King James Version verses (public domain). Add your own verses, family sayings or quotes here, and set a widget to “My own entries”."
+      hint="The verse widget uses a built-in list of verses from the ESV® Bible (English Standard Version®), copyright © 2001 by Crossway, used by permission. Add your own verses, family sayings or quotes here, and set a widget to “My own entries”."
     >
       {(data ?? []).map((q) => (
         <div key={q.id} className="table-row">

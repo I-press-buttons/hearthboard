@@ -247,7 +247,7 @@ describe('quotes', () => {
     const a = app.quotes.current('verse', 'daily', new Date(2026, 9, 1, 8));
     const b = app.quotes.current('verse', 'daily', new Date(2026, 9, 1, 22));
     expect(a).toEqual(b);
-    expect(a.source).toMatch(/\(KJV\)$/);
+    expect(a.source).toMatch(/\(ESV\)$/);
     const kinds = [1, 2].map(
       (d) => app!.quotes.current('both', 'daily', new Date(2026, 9, d, 12)).kind,
     );

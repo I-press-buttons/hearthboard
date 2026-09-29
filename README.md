@@ -19,8 +19,8 @@ phone or PC.
   completes it on your phone.
 - **Photos from Synology Photos:** a slideshow from your photo library, or
   from one album. iPhone HEIC photos use the previews Synology already made.
-- **Bible verse or quote of the day:** a built-in list of King James Version
-  verses (public domain) plus quotes, or your own entries.
+- **Bible verse or quote of the day:** a built-in list of ESV verses plus
+  quotes, or your own entries.
 - **Checklists:** chores, groceries, packing lists. Optionally untick
   everything at midnight.
 - **A clock.**
@@ -185,3 +185,9 @@ Repository layout: `shared/` (types and schemas used by both sides),
 ## License
 
 [MIT](LICENSE)
+
+## Scripture copyright
+
+Scripture quotations are from the ESV® Bible (The Holy Bible, English Standard
+Version®), © 2001 by Crossway, a publishing ministry of Good News Publishers.
+Used by permission. All rights reserved.
