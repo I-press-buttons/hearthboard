@@ -455,7 +455,7 @@ function CalendarsCard() {
   return (
     <Card
       title="Calendars"
-      hint="Events you add, drag or edit on the board are saved back to the calendar they belong to. Changes made on your phone show up within a minute."
+      hint="Events you add, drag or edit on the board are saved back to the calendar they belong to. Changes made on your phone show up within a minute. Admins can change any calendar. Family members can change only calendars with “Family can add and change events” switched on, so leave it off for personal or work calendars."
     >
       {googleResult && googleResult !== 'ok' && (
         <div className="error-text">Google: {googleResult}</div>
@@ -505,7 +505,7 @@ function CalendarsCard() {
           {(calendars ?? [])
             .filter((c) => c.accountId === a.id)
             .map((c) => (
-              <div key={c.id} className="table-row" style={{ paddingLeft: 12 }}>
+              <div key={c.id} className="table-row" style={{ paddingLeft: 12, flexWrap: 'wrap' }}>
                 <input
                   type="checkbox"
                   checked={c.enabled}
@@ -519,7 +519,18 @@ function CalendarsCard() {
                   title="Colour"
                 />
                 <span style={{ flex: 1 }}>{c.name}</span>
-                {!c.writable && <span className="hint">read-only</span>}
+                {c.writable ? (
+                  <label className="row" style={{ fontSize: 13, gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={c.membersCanEdit}
+                      onChange={(e) => patch(c.id, { membersCanEdit: e.target.checked })}
+                    />
+                    Family can add and change events
+                  </label>
+                ) : (
+                  <span className="hint">read-only</span>
+                )}
               </div>
             ))}
         </div>

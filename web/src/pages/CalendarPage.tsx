@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { DateSelectArg, EventChangeArg } from '@fullcalendar/core';
 import { parseQuickAdd, type CalendarDTO, type EventDTO } from '@hearthboard/shared';
 import { api } from '../api';
+import { useMe } from '../components/Auth';
 import { Modal, TopBar } from '../components/TopBar';
 import { useLiveQuery } from '../live';
 import { CalendarView } from '../widgets/CalendarView';
@@ -18,6 +19,23 @@ function addDays(date: string, n: number) {
   const d = new Date(date + 'T00:00:00');
   d.setDate(d.getDate() + n);
   return toDateInput(d);
+}
+
+/** Calendars this person can add events to. */
+const editableCalendars = (calendars: CalendarDTO[]) =>
+  calendars.filter((c) => c.editable && c.enabled);
+
+/** Shown instead of the add-event form when there is no calendar this person can add to. */
+function NoCalendarHint() {
+  const { user } = useMe();
+  return user.role === 'admin' ? (
+    <>Connect a calendar in Settings first.</>
+  ) : (
+    <>
+      You can look at the calendar, but you can’t add or change events yet. Ask an admin to turn on
+      “Family can add and change events” for a calendar in Settings → Calendars.
+    </>
+  );
 }
 
 interface Draft {
@@ -74,8 +92,8 @@ function EventDialog({
   const [confirmScope, setConfirmScope] = useState<null | 'save' | 'delete'>(null);
   const isNew = !d.resourceId;
   const set = (p: Partial<Draft>) => setD((cur) => ({ ...cur, ...p }));
-  const writable = calendars.filter((c) => c.writable && c.enabled);
-  const readOnly = !isNew && !calendars.find((c) => c.id === d.calendarId)?.writable;
+  const editable = editableCalendars(calendars);
+  const readOnly = !isNew && !calendars.find((c) => c.id === d.calendarId)?.editable;
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -171,7 +189,7 @@ function EventDialog({
             disabled={!isNew}
             onChange={(e) => set({ calendarId: e.target.value })}
           >
-            {(isNew ? writable : calendars).map((c) => (
+            {(isNew ? editable : calendars).map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}{' '}
                 {c.provider === 'google'
@@ -264,12 +282,16 @@ function EventDialog({
             {readOnly ? 'Close' : 'Cancel'}
           </button>
           {!readOnly && (
-            <button className="btn primary" disabled={busy || (isNew && !writable.length)}>
+            <button className="btn primary" disabled={busy || (isNew && !editable.length)}>
               {isNew ? 'Add' : 'Save'}
             </button>
           )}
         </div>
-        {isNew && !writable.length && <p className="hint">Connect a calendar in Settings first.</p>}
+        {isNew && !editable.length && (
+          <p className="hint">
+            <NoCalendarHint />
+          </p>
+        )}
       </form>
     </Modal>
   );
@@ -313,9 +335,9 @@ function QuickAdd({
     () => (text.trim() ? parseQuickAdd(text, new Date(), { dayFirst }) : null),
     [text, dayFirst],
   );
-  const writable = calendars.filter((c) => c.writable && c.enabled);
-  const cal = writable.find((c) => c.id === calendarId)?.id ?? defaultCalendar;
-  if (!writable.length) return null;
+  const editable = editableCalendars(calendars);
+  const cal = editable.find((c) => c.id === calendarId)?.id ?? defaultCalendar;
+  if (!editable.length) return null;
 
   const add = async () => {
     if (!parsed) return;
@@ -359,14 +381,14 @@ function QuickAdd({
             setMsg(null);
           }}
         />
-        {writable.length > 1 && (
+        {editable.length > 1 && (
           <select
             aria-label="Calendar"
             value={cal}
             onChange={(e) => setCalendarId(e.target.value)}
             style={{ width: 'auto', maxWidth: 160 }}
           >
-            {writable.map((c) => (
+            {editable.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>
@@ -411,8 +433,10 @@ export function CalendarPage() {
   const narrow = window.innerWidth < 700;
   const initialView: View = narrow ? 'listWeek' : 'timeGridWeek';
 
+  const canAdd = editableCalendars(calendars ?? []).length > 0;
+
   const defaultCalendar = () => {
-    const w = (calendars ?? []).filter((c) => c.writable && c.enabled);
+    const w = editableCalendars(calendars ?? []);
     return (w.find((c) => c.id === lastCal) ?? w[0])?.id ?? '';
   };
 
@@ -461,17 +485,19 @@ export function CalendarPage() {
     <div className="app">
       <TopBar active="calendar">
         <span className="spacer" />
-        <button
-          className="btn primary"
-          onClick={() => {
-            const s = new Date();
-            s.setMinutes(0, 0, 0);
-            s.setHours(s.getHours() + 1);
-            setDraft(newDraft(s, new Date(s.getTime() + 3600_000), false));
-          }}
-        >
-          + Event
-        </button>
+        {canAdd && (
+          <button
+            className="btn primary"
+            onClick={() => {
+              const s = new Date();
+              s.setMinutes(0, 0, 0);
+              s.setHours(s.getHours() + 1);
+              setDraft(newDraft(s, new Date(s.getTime() + 3600_000), false));
+            }}
+          >
+            + Event
+          </button>
+        )}
       </TopBar>
       {error && (
         <div className="error-text" style={{ padding: '6px 14px' }} onClick={() => setError(null)}>
@@ -479,6 +505,11 @@ export function CalendarPage() {
         </div>
       )}
       <div className="calendar-page">
+        {calendars && !canAdd && (
+          <p className="hint quick-add">
+            <NoCalendarHint />
+          </p>
+        )}
         {calendars && (
           <QuickAdd
             calendars={calendars}
@@ -495,6 +526,7 @@ export function CalendarPage() {
             view={initialView}
             focusDate={focusDate}
             editable
+            selectable={canAdd}
             toolbar={{
               left: 'prev,next today',
               center: 'title',
