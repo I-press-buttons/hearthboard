@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -69,9 +69,18 @@ export function CalendarView({
 
   useLive(['events', 'calendars'], () => ref.current?.getApi().refetchEvents());
 
-  useEffect(() => {
-    ref.current?.getApi().refetchEvents();
-  }, [idsKey]);
+  // FullCalendar tells event sources apart by identity: a new function on every render (a
+  // display re-renders every 30 s) would download the events all over again each time. A new
+  // one when the calendars change is what makes it refetch then.
+  const events = useCallback(
+    (info: EventSourceFuncArg, success: (e: FcEvent[]) => void, failure: (e: Error) => void) => {
+      fetchEvents(info.start, info.end, idsKey ? idsKey.split(',') : []).then(
+        (evts) => success(evts.map((e) => toFullCalendar(e, !!editable))),
+        failure,
+      );
+    },
+    [idsKey, editable],
+  );
 
   useEffect(() => {
     ref.current?.getApi().changeView(view);
@@ -130,12 +139,7 @@ export function CalendarView({
         selectMirror
         longPressDelay={350}
         eventDurationEditable={!!editable}
-        events={(info: EventSourceFuncArg, success, failure) => {
-          fetchEvents(info.start, info.end, idsKey ? idsKey.split(',') : []).then(
-            (evts) => success(evts.map((e) => toFullCalendar(e, !!editable))),
-            failure,
-          );
-        }}
+        events={events}
         select={onSelect}
         eventClick={(arg: EventClickArg) => {
           arg.jsEvent.preventDefault();

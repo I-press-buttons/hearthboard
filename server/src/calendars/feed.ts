@@ -178,6 +178,8 @@ const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
 export class IcsFeedProvider implements CalendarProvider {
   private last: Download | null = null;
+  /** Name and color of the last download, by its hash. */
+  private info: { hash: string; name: string | null; color: string | null } | null = null;
   private readonly url: string;
 
   constructor(
@@ -228,15 +230,21 @@ export class IcsFeedProvider implements CalendarProvider {
   }
 
   async listCalendars(): Promise<RemoteCalendar[]> {
-    // Reuse a download from the last minute (adding an account lists, then syncs).
+    // Reuse a download from the last minute (adding an account lists, then syncs); otherwise
+    // ask with If-None-Match, so an unchanged feed isn't downloaded and parsed all over again.
     const d =
-      this.last && Date.now() - this.last.at < 60_000 ? this.last : await this.download(false);
-    const parsed = splitFeed(d!.body);
+      this.last && Date.now() - this.last.at < 60_000
+        ? this.last
+        : ((await this.download(true)) ?? this.last);
+    if (this.info?.hash !== d!.hash) {
+      const { name, color } = splitFeed(d!.body);
+      this.info = { hash: d!.hash, name, color };
+    }
     return [
       {
         remoteId: REMOTE_ID,
-        name: parsed.name ?? new URL(this.url).hostname,
-        color: parsed.color,
+        name: this.info.name ?? new URL(this.url).hostname,
+        color: this.info.color,
         writable: false,
       },
     ];

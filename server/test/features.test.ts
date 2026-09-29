@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LiveMessage } from '@hearthboard/shared';
 import { defaultProviderFactory, syncWindow } from '../src/calendars/service';
 import {
@@ -325,6 +325,29 @@ END:VEVENT
 `);
     const changed = await p.sync({ remoteId: 'feed', cursor: first.cursor, force: true }, win);
     expect(changed.upserts.map((r) => r.remoteId)).toContain('new');
+  });
+
+  it('refreshes the calendar name without downloading an unchanged feed again', async () => {
+    const statuses: number[] = [];
+    const f = (async (_url: string | URL, init: RequestInit = {}) => {
+      const h = (init.headers ?? {}) as Record<string, string>;
+      const res =
+        h['if-none-match'] === '"v1"'
+          ? new Response(null, { status: 304 })
+          : new Response(feed(), { status: 200, headers: { etag: '"v1"' } });
+      statuses.push(res.status);
+      return res;
+    }) as typeof fetch;
+    const p = new IcsFeedProvider({ url: 'webcal://school.example/cal.ics' }, f);
+    const [first] = await p.listCalendars();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 16 * 60_000);
+      expect(await p.listCalendars()).toEqual([first]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(statuses).toEqual([200, 304]);
   });
 
   it('subscribes from Settings and shows read-only events', async () => {
