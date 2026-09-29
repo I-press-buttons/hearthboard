@@ -48,6 +48,8 @@ const CalendarPatch = z.object({
     .regex(/^#[0-9a-fA-F]{6}$/)
     .optional(),
   name: z.string().min(1).max(100).optional(),
+  /** Let family members (not just admins) add and change events on this calendar. */
+  membersCanEdit: z.boolean().optional(),
 });
 
 interface PendingGoogle {
@@ -83,11 +85,12 @@ export function registerCalendarRoutes(
     });
   };
 
-  app.get('/api/calendars', async () => svc.listCalendars());
+  // Open to displays that aren't signed in; `editable` tells each viewer what they may change.
+  app.get('/api/calendars', async (req) => svc.listCalendars(auth.currentUser(req)));
 
   app.patch<{ Params: { id: string } }>('/api/calendars/:id', admin, async (req) => {
     svc.updateCalendar(req.params.id, CalendarPatch.parse(req.body));
-    return svc.listCalendars();
+    return svc.listCalendars(req.user);
   });
 
   app.get('/api/accounts', admin, async () => svc.listAccounts());
@@ -177,7 +180,7 @@ export function registerCalendarRoutes(
       if (end.getTime() - start.getTime() > 400 * 86_400_000)
         throw new HttpError(400, 'Range too large');
       const ids = req.query.calendars?.split(',').filter(Boolean);
-      return svc.events(start, end, ids);
+      return svc.events(start, end, ids, auth.currentUser(req));
     },
   );
 
@@ -185,16 +188,16 @@ export function registerCalendarRoutes(
     const input = EventInput.parse(req.body);
     if (Date.parse(input.end) < Date.parse(input.start))
       throw new HttpError(400, 'The event ends before it starts.');
-    return { resourceId: await svc.createEvent(input) };
+    return { resourceId: await svc.createEvent(input, req.user) };
   });
 
   app.patch<{ Params: { id: string } }>('/api/events/:id', guard, async (req) => {
-    await svc.updateEvent(req.params.id, EventPatch.parse(req.body));
+    await svc.updateEvent(req.params.id, EventPatch.parse(req.body), req.user);
     return { ok: true };
   });
 
   app.delete<{ Params: { id: string } }>('/api/events/:id', guard, async (req) => {
-    await svc.deleteEvent(req.params.id, EventDelete.parse(req.body ?? {}));
+    await svc.deleteEvent(req.params.id, EventDelete.parse(req.body ?? {}), req.user);
     return { ok: true };
   });
 }

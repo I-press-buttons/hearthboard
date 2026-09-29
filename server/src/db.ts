@@ -150,6 +150,12 @@ export const MIGRATIONS: (string | ((db: DB) => void))[] = [
     expires_at INTEGER
   );
   `,
+
+  // Whether family members (not just admins) may add and change events on a calendar. Off for
+  // every calendar, so connecting someone's personal or work account never opens it to the family.
+  `
+  ALTER TABLE calendars ADD COLUMN members_can_edit INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export function openDb(file: string): DB {
