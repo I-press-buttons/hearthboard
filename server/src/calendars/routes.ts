@@ -163,7 +163,7 @@ export function registerCalendarRoutes(
   });
 
   app.post('/api/sync', admin, async () => {
-    await svc.syncAll();
+    await svc.syncAll(true);
     return svc.listAccounts();
   });
 

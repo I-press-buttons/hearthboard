@@ -17,6 +17,13 @@ function ago(ts: number | null) {
   return new Date(ts).toLocaleString();
 }
 
+function inTime(ts: number) {
+  const s = Math.round((ts - Date.now()) / 1000);
+  if (s < 60) return 'in under a minute';
+  if (s < 3600) return `in ${Math.round(s / 60)} min`;
+  return `in ${Math.round(s / 3600)} h`;
+}
+
 // ---------------- general ----------------
 
 const SYNC_CHOICES: [number, string][] = [
@@ -481,7 +488,11 @@ function CalendarsCard() {
               className={a.status === 'error' ? 'status-error' : 'status-ok'}
               style={{ fontSize: 13 }}
             >
-              {a.status === 'error' ? '⚠ error' : `synced ${ago(a.lastSync)}`}
+              {a.paused
+                ? '⚠ paused'
+                : a.status === 'error'
+                  ? '⚠ error'
+                  : `synced ${ago(a.lastSync)}`}
             </span>
             <button
               className="btn small"
@@ -502,6 +513,11 @@ function CalendarsCard() {
             </button>
           </div>
           {a.lastError && <div className="error-text">{a.lastError}</div>}
+          {a.status === 'error' && a.nextRetryAt && (
+            <div className="hint" style={{ margin: '0 0 6px' }}>
+              Hearthboard will try again {inTime(a.nextRetryAt)}, or press Sync now.
+            </div>
+          )}
           {(calendars ?? [])
             .filter((c) => c.accountId === a.id)
             .map((c) => (
