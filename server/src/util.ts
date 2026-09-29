@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { z } from 'zod';
 
 /** YYYY-MM-DD in the server's local time zone (TZ). */
 export function localDate(d: Date): string {
@@ -15,6 +16,21 @@ export function errorMessage(err: unknown): string {
     return 'The server took too long to answer.';
   return err instanceof Error ? err.message : String(err);
 }
+
+/** True for http:// and https:// addresses only (zod's .url() also accepts ftp:, file:, javascript: and more). */
+export function isHttpUrl(s: string): boolean {
+  try {
+    const { protocol } = new URL(s);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+const HTTP_ONLY = 'Enter an address starting with http:// or https://';
+
+/** A server address for a form field: http or https, nothing else. */
+export const httpUrl = () => z.string().url().refine(isHttpUrl, HTTP_ONLY);
 
 /** How long one call to an outside server (Google, CalDAV, Synology) may take. */
 export const REQUEST_TIMEOUT_MS = 30_000;
