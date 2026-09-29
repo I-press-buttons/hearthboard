@@ -6,3 +6,11 @@ data
 test-results
 playwright-report
 *.log
+server/data
+.e2e-data
+**/.env
+**/.env.*
+**/secret.key
+**/*.db
+**/*.db-shm
+**/*.db-wal

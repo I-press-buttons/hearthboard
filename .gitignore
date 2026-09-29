@@ -1,10 +1,17 @@
 node_modules/
 dist/
 /data/
+# `npm run dev` runs the server from server/, so its data lands here.
+/server/data/
+secret.key
+*.db
+*.db-shm
+*.db-wal
 coverage/
 test-results/
 playwright-report/
 *.log
 .env
+.env.*
 .DS_Store
 .e2e-data/
