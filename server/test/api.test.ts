@@ -163,6 +163,36 @@ describe('request hardening', () => {
     expect(read.raw.headers['referrer-policy']).toBe('same-origin');
   });
 
+  it("sends a strict CSP, and lets other sites frame the app only when they're listed", async () => {
+    app = await testApp();
+    let res = (await app.inject('GET', '/api/health')).raw;
+    const csp = res.headers['content-security-policy'] as string;
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("connect-src 'self' ws://localhost:80 wss://localhost:80");
+    expect(csp).toContain("frame-ancestors 'self'");
+    expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
+    await app.app.close();
+
+    app = await testApp({ embedOrigins: ['http://homeassistant.local:8123'] });
+    res = (await app.inject('GET', '/api/health')).raw;
+    expect(res.headers['content-security-policy']).toContain(
+      'frame-ancestors http://homeassistant.local:8123',
+    );
+    expect(res.headers['x-frame-options']).toBeUndefined();
+  });
+
+  it('reads HEARTHBOARD_EMBED_ORIGINS and refuses anything else', () => {
+    const env = (v: string) => loadConfig({ HEARTHBOARD_EMBED_ORIGINS: v }).embedOrigins;
+    expect(loadConfig({}).embedOrigins).toEqual([]);
+    expect(env('http://homeassistant.local:8123/, https://ha.example.com')).toEqual([
+      'http://homeassistant.local:8123',
+      'https://ha.example.com',
+    ]);
+    expect(() => env("'unsafe-inline'")).toThrow(/HEARTHBOARD_EMBED_ORIGINS/);
+    expect(() => env('http://x.local; script-src *')).toThrow(/HEARTHBOARD_EMBED_ORIGINS/);
+  });
+
   it('keeps internal error details from people who are not signed in', async () => {
     const dataDir = tmpDir();
     const ctx = await buildApp({ ...loadConfig({}), dataDir }, { background: false });

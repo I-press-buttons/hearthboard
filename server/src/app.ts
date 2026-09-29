@@ -13,6 +13,7 @@ import { Checklists } from './checklists';
 import type { Config } from './config';
 import { openDb, type DB } from './db';
 import { ensureDemoPhotos, seedDemo } from './demo';
+import { registerSecurityHeaders } from './headers';
 import { LiveHub } from './live';
 import { Meals } from './meals';
 import { Notes } from './notes';
@@ -118,10 +119,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     )
       return reply.code(403).send({ error: 'Requests from other sites are not allowed.' });
   });
-  app.addHook('onSend', async (_req, reply) => {
-    reply.header('x-content-type-options', 'nosniff');
-    reply.header('referrer-policy', 'same-origin');
-  });
+  registerSecurityHeaders(app, config.embedOrigins);
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof ZodError) {

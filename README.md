@@ -181,6 +181,7 @@ Docker only needs what the container itself requires:
 | `HEARTHBOARD_ADMIN_PASSWORD` | (none)          | Optional. On first start, create an `admin` user with this password instead of setting one up on first visit. Ignored once anyone has signed up.     |
 | `HEARTHBOARD_RESET_ADMIN`    | (off)           | Recovery only: `1` resets the `admin` user to `HEARTHBOARD_ADMIN_PASSWORD` with two-step sign-in off, on every start. Remove it once you're back in. |
 | `HEARTHBOARD_TRUST_PROXY`    | (off)           | Behind a reverse proxy (e.g. DSM's, for HTTPS): the proxy's address or `true`, so sign-in lockouts see each device's own address.                    |
+| `HEARTHBOARD_EMBED_ORIGINS`  | (none)          | Optional. Sites allowed to show the board in a frame, such as a Home Assistant dashboard: `http://homeassistant.local:8123`.                         |
 
 Older compose files that still set `TZ`, `HEARTHBOARD_SYNC_INTERVAL` or
 `HEARTHBOARD_PUBLIC_URL` keep working: those values are used only until you
