@@ -26,6 +26,8 @@ const SESSION_TTL_MS = 365 * 24 * 3600 * 1000;
 const PENDING_TTL_MS = 15 * 60_000;
 /** Wrong codes allowed before the password has to be entered again. */
 const MAX_CODE_ATTEMPTS = 5;
+/** Wrong passwords or codes from one address are forgotten after this long without another. */
+const FAILURE_MEMORY_MS = 3600_000;
 
 type Stage = 'mfa' | 'enroll' | 'full';
 
@@ -46,7 +48,7 @@ export interface AuthOptions {
 }
 
 export class Auth {
-  private failures = new Map<string, { count: number; until: number }>();
+  private failures = new Map<string, { count: number; until: number; last: number }>();
 
   constructor(
     private db: DB,
@@ -108,11 +110,9 @@ export class Auth {
 
   checkIngestToken(header: string | undefined): boolean {
     const given = header?.replace(/^Bearer\s+/i, '').trim() ?? '';
-    const expected = this.ingestToken();
-    return (
-      given.length === expected.length &&
-      crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))
-    );
+    // Compare hashes: equal-length digests, however many bytes the given token has.
+    const digest = (s: string) => crypto.createHash('sha256').update(s).digest();
+    return crypto.timingSafeEqual(digest(given), digest(this.ingestToken()));
   }
 
   // ---------------- sessions ----------------
@@ -218,18 +218,49 @@ export class Auth {
 
   // ---------------- brute-force protection ----------------
 
-  private checkThrottle(req: FastifyRequest) {
-    const fail = this.failures.get(req.ip);
+  /**
+   * Wrong passwords count per address and account, so signing in to your own account doesn't
+   * wipe out guesses at someone else's. Wrong codes count per account: whoever is guessing
+   * them already has the password and can sign in again from anywhere.
+   */
+  private passwordKey(req: FastifyRequest, username: string) {
+    return `${req.ip}|${username.trim().toLowerCase()}`;
+  }
+
+  private codeKey(userId: string) {
+    return `code|${userId}`;
+  }
+
+  private checkThrottle(key: string) {
+    const fail = this.failures.get(key);
     if (fail && fail.until > Date.now())
       throw new HttpError(429, 'Too many attempts. Wait a bit and try again.');
   }
 
-  private recordFailure(req: FastifyRequest) {
-    const count = (this.failures.get(req.ip)?.count ?? 0) + 1;
-    this.failures.set(req.ip, {
+  private recordFailure(key: string) {
+    const now = Date.now();
+    if (this.failures.size > 1000) {
+      for (const [k, f] of this.failures) {
+        if (now - f.last > FAILURE_MEMORY_MS && f.until < now) this.failures.delete(k);
+      }
+    }
+    const prev = this.failures.get(key);
+    const count = (prev && now - prev.last < FAILURE_MEMORY_MS ? prev.count : 0) + 1;
+    this.failures.set(key, {
       count,
-      until: count >= 5 ? Date.now() + 30_000 * (count - 4) : 0,
+      until: count >= 5 ? now + 30_000 * (count - 4) : 0,
+      last: now,
     });
+  }
+
+  /** Check the signed-in user's password again before a sensitive change, with the lockout. */
+  private async confirmPassword(req: FastifyRequest, password: string, error: string) {
+    const key = this.passwordKey(req, req.user!.username);
+    this.checkThrottle(key);
+    if (!(await this.users.checkPassword(req.user!, password))) {
+      this.recordFailure(key);
+      throw new HttpError(400, error);
+    }
   }
 
   // ---------------- routes ----------------
@@ -261,14 +292,15 @@ export class Auth {
     });
 
     app.post('/api/auth/login', async (req, reply) => {
-      this.checkThrottle(req);
       const { username, password } = LoginInput.parse(req.body);
+      const key = this.passwordKey(req, username);
+      this.checkThrottle(key);
       const user = this.users.byUsername(username);
       if (!(await this.users.checkPassword(user, password))) {
-        this.recordFailure(req);
+        this.recordFailure(key);
         return reply.code(401).send({ error: 'Wrong username or password.' });
       }
-      this.failures.delete(req.ip);
+      this.failures.delete(key);
       this.endSession(req);
       const stage: Stage = user!.totp_secret ? 'mfa' : this.requireMfa() ? 'enroll' : 'full';
       this.startSession(reply, user!.id, stage);
@@ -277,14 +309,15 @@ export class Auth {
 
     // Second step: a code from the authenticator app, or a recovery code.
     app.post('/api/auth/mfa', async (req, reply) => {
-      this.checkThrottle(req);
       const cur = this.session(req);
       if (cur?.s.stage !== 'mfa')
         return reply.code(401).send({ error: 'That sign-in expired. Start again.' });
+      const key = this.codeKey(cur.user.id);
+      this.checkThrottle(key);
       const { code } = CodeInput.parse(req.body);
       const used = this.users.verifySecondFactor(cur.user.id, code);
       if (!used) {
-        this.recordFailure(req);
+        this.recordFailure(key);
         const attempts = cur.s.attempts + 1;
         if (attempts >= MAX_CODE_ATTEMPTS) {
           this.endSession(req);
@@ -295,7 +328,7 @@ export class Auth {
           .run(attempts, cur.s.token_hash);
         return reply.code(401).send({ error: 'That code is not right.' });
       }
-      this.failures.delete(req.ip);
+      this.failures.delete(key);
       this.endSession(req);
       this.startSession(reply, cur.user.id, 'full');
       return {
@@ -312,12 +345,8 @@ export class Auth {
     });
 
     app.post('/api/auth/password', signedIn, async (req) => {
-      this.checkThrottle(req);
       const { current, password } = PasswordChange.parse(req.body);
-      if (!(await this.users.checkPassword(req.user!, current))) {
-        this.recordFailure(req);
-        throw new HttpError(400, 'Your current password is not right.');
-      }
+      await this.confirmPassword(req, current, 'Your current password is not right.');
       await this.users.setPassword(req.user!.id, password);
       this.endSessions(req.user!.id, req);
       return { ok: true };
@@ -353,17 +382,17 @@ export class Auth {
 
     app.post('/api/auth/totp/disable', signedIn, async (req) => {
       const { password } = PasswordConfirm.parse(req.body);
-      if (!(await this.users.checkPassword(req.user!, password)))
-        throw new HttpError(400, 'Your password is not right.');
+      await this.confirmPassword(req, password, 'Your password is not right.');
       this.users.disableTotp(req.user!.id);
+      // Required for everyone: other devices sign in and set it up again (this one next time).
+      if (this.requireMfa()) this.endSessions(req.user!.id, req);
       return { ok: true };
     });
 
     app.post('/api/auth/recovery-codes', signedIn, async (req) => {
       const { password } = PasswordConfirm.parse(req.body);
       if (!req.user!.totp_secret) throw new HttpError(400, 'Two-step sign-in is off.');
-      if (!(await this.users.checkPassword(req.user!, password)))
-        throw new HttpError(400, 'Your password is not right.');
+      await this.confirmPassword(req, password, 'Your password is not right.');
       return { recoveryCodes: this.users.newRecoveryCodes(req.user!.id) };
     });
 

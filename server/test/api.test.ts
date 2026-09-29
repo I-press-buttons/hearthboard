@@ -1,10 +1,15 @@
+import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { LiveMessage } from '@hearthboard/shared';
+import type { CalendarDTO, EventDTO, LiveMessage } from '@hearthboard/shared';
 import { DemoProvider } from '../src/calendars/demo';
-import { jpeg, testApp } from './helpers';
+import { buildApp } from '../src/app';
+import { buildIcs } from '../src/calendars/ics';
+import { loadConfig } from '../src/config';
+import { MIGRATIONS } from '../src/db';
+import { jpeg, testApp, testClient, tmpDir } from './helpers';
 
 type App = Awaited<ReturnType<typeof testApp>>;
 let app: App | null = null;
@@ -137,6 +142,80 @@ describe('checklists', () => {
   });
 });
 
+describe('request hardening', () => {
+  it('refuses changes posted from other sites, but not from the app or a Shortcut', async () => {
+    app = await testApp();
+    await app.login();
+    const post = (site?: string) =>
+      app!.inject(
+        'POST',
+        '/api/checklists',
+        { name: 'Groceries' },
+        site ? { 'sec-fetch-site': site } : {},
+      );
+    expect((await post('cross-site')).status).toBe(403);
+    expect((await post('same-site')).status).toBe(403); // e.g. another app on the NAS
+    expect((await post('same-origin')).status).toBe(200);
+    expect((await post()).status).toBe(200); // older browsers, iPhone Shortcuts
+    // Reading is fine from anywhere (a display in an iframe, a link).
+    const read = await app.inject('GET', '/api/checklists', undefined, {
+      'sec-fetch-site': 'cross-site',
+    });
+    expect(read.status).toBe(200);
+    expect(read.raw.headers['x-content-type-options']).toBe('nosniff');
+    expect(read.raw.headers['referrer-policy']).toBe('same-origin');
+  });
+
+  it("sends a strict CSP, and lets other sites frame the app only when they're listed", async () => {
+    app = await testApp();
+    let res = (await app.inject('GET', '/api/health')).raw;
+    const csp = res.headers['content-security-policy'] as string;
+    expect(csp).toContain("script-src 'self'");
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("connect-src 'self' ws://localhost:80 wss://localhost:80");
+    expect(csp).toContain("frame-ancestors 'self'");
+    expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
+    await app.app.close();
+
+    app = await testApp({ embedOrigins: ['http://homeassistant.local:8123'] });
+    res = (await app.inject('GET', '/api/health')).raw;
+    expect(res.headers['content-security-policy']).toContain(
+      'frame-ancestors http://homeassistant.local:8123',
+    );
+    expect(res.headers['x-frame-options']).toBeUndefined();
+  });
+
+  it('reads HEARTHBOARD_EMBED_ORIGINS and refuses anything else', () => {
+    const env = (v: string) => loadConfig({ HEARTHBOARD_EMBED_ORIGINS: v }).embedOrigins;
+    expect(loadConfig({}).embedOrigins).toEqual([]);
+    expect(env('http://homeassistant.local:8123/, https://ha.example.com')).toEqual([
+      'http://homeassistant.local:8123',
+      'https://ha.example.com',
+    ]);
+    expect(() => env("'unsafe-inline'")).toThrow(/HEARTHBOARD_EMBED_ORIGINS/);
+    expect(() => env('http://x.local; script-src *')).toThrow(/HEARTHBOARD_EMBED_ORIGINS/);
+  });
+
+  it('keeps internal error details from people who are not signed in', async () => {
+    const dataDir = tmpDir();
+    const ctx = await buildApp({ ...loadConfig({}), dataDir }, { background: false });
+    ctx.app.get('/api/test-boom', async () => {
+      throw new Error('SQLITE_CORRUPT at /data/hearthboard.db');
+    });
+    ctx.app.get('/api/test-boom-signed-in', { preHandler: ctx.auth.guard }, async () => {
+      throw new Error('Upstream said no');
+    });
+    await ctx.app.ready();
+    app = { ...ctx, ...testClient(ctx.app) } as unknown as App;
+    const out = await app.inject('GET', '/api/test-boom');
+    expect(out).toMatchObject({ status: 502, body: { error: 'Something went wrong' } });
+    await app.login();
+    expect((await app.inject('GET', '/api/test-boom-signed-in')).body.error).toBe(
+      'Upstream said no',
+    );
+  });
+});
+
 describe('reminders ingest', () => {
   it('requires the token and accepts loose Shortcuts payloads', async () => {
     app = await testApp();
@@ -147,6 +226,11 @@ describe('reminders ingest', () => {
       (await app.inject('POST', '/api/reminders/ingest', [], { authorization: 'Bearer nope' }))
         .status,
     ).toBe(401);
+    // A token with multi-byte characters is simply wrong, not a server error.
+    const accented = { authorization: `Bearer ${'é'.repeat(token.length)}` };
+    expect((await app.inject('POST', '/api/reminders/ingest', [], accented)).status).toBe(401);
+    // Only in the header: a token in the URL would end up in the request log.
+    expect((await app.inject('POST', `/api/reminders/ingest?token=${token}`, [])).status).toBe(401);
 
     const res = await app.inject(
       'POST',
@@ -275,6 +359,42 @@ describe('photos (folder source)', () => {
     const id = 'f.' + Buffer.from(JSON.stringify('../hearthboard.db')).toString('base64url');
     expect((await app.inject('GET', `/api/photos/img/${id}`)).status).toBe(404);
   });
+
+  it('only serves photos it handed out, and never hidden or non-image files', async () => {
+    app = await testApp();
+    await app.login();
+    const root = app.config.photosDir;
+    await jpeg(path.join(root, 'beach.jpg'));
+    await jpeg(path.join(root, '#recycle', 'deleted.jpg'));
+    await jpeg(path.join(root, '.private', 'secret.jpg'));
+    fs.writeFileSync(path.join(root, 'notes.txt'), 'not a photo');
+    fs.symlinkSync(path.join(app.config.dataDir, 'hearthboard.db'), path.join(root, 'db.jpg'));
+
+    const forged = (rel: string) => 'f.' + Buffer.from(JSON.stringify(rel)).toString('base64url');
+    expect((await app.inject('GET', `/api/photos/img/${forged('beach.jpg')}`)).status).toBe(404);
+    for (const rel of ['#recycle/deleted.jpg', '.private/secret.jpg', 'notes.txt', 'db.jpg']) {
+      expect(await app.photos.folder.readable(rel), rel).toBeNull();
+    }
+    expect(await app.photos.folder.readable('./x/../beach.jpg')).toBe(path.join(root, 'beach.jpg'));
+
+    // Hidden folders can't be picked, and every spelling of a folder shares one scan.
+    for (const folder of ['#recycle', '.private', '../', 'x/../#recycle']) {
+      const res = await app.inject('GET', `/api/photos/next?folder=${encodeURIComponent(folder)}`);
+      expect(res.body.id, folder).toBeNull();
+    }
+    expect(app.photos.folder.folderKey('./a/../')).toBe('');
+
+    // Deep folders make long ids; they still have to reach the image route.
+    const deep =
+      'Holidays/2026-07 Summer at the lake with the grandparents/IMG_20260712_153045_HDR.jpg';
+    await jpeg(path.join(root, deep));
+    const next = await app.inject(
+      'GET',
+      `/api/photos/next?folder=${encodeURIComponent(path.dirname(deep))}`,
+    );
+    expect(next.body.id.length).toBeGreaterThan(100);
+    expect((await app.inject('GET', `/api/photos/img/${next.body.id}`)).status).toBe(200);
+  });
 });
 
 describe('calendar write-back', () => {
@@ -382,5 +502,291 @@ describe('calendar write-back', () => {
       allDay: true,
     });
     expect(res.status).toBe(403);
+  });
+});
+
+describe('who can change events', () => {
+  const week = '/api/events?start=2026-10-01T00:00:00Z&end=2026-10-15T00:00:00Z';
+  const REFUSED = 'Only an admin can change events on this calendar.';
+
+  /** Two writable calendars (Family, Work) and a read-only one (Holidays), each with an event. */
+  async function withPeople() {
+    const provider = new DemoProvider([
+      { remoteId: '/family/', name: 'Family', color: null, writable: true },
+      { remoteId: '/work/', name: 'Work', color: null, writable: true },
+      { remoteId: '/holidays/', name: 'Holidays', color: null, writable: false },
+    ]);
+    const ics = (title: string) =>
+      buildIcs(
+        { title, start: '2026-10-09T17:00:00Z', end: '2026-10-09T18:00:00Z', allDay: false },
+        `${title}@test`,
+      );
+    provider.put('/family/', ics('Family dinner'));
+    provider.put('/work/', ics('Board meeting'));
+    provider.put('/holidays/', ics('Public holiday'));
+    // A repeating event, to try "only this one" and "all events".
+    provider.put(
+      '/family/',
+      ics('Trash night').replace('END:VEVENT', 'RRULE:FREQ=WEEKLY\r\nEND:VEVENT'),
+    );
+    app = await testApp({}, { providerFactory: () => provider });
+    await app.login();
+    await app.calendars.addAccount('demo', 'Household', null);
+    await app.calendars.syncAll();
+
+    for (const [username, role] of [
+      ['sam', 'member'],
+      ['robin', 'admin'],
+    ])
+      await app.inject('POST', '/api/users', {
+        username,
+        name: username,
+        password: `${username}-password`,
+        role,
+      });
+    const sam = app.client();
+    await sam.signIn('sam', 'sam-password');
+    const robin = app.client();
+    await robin.signIn('robin', 'robin-password');
+    const display = await app.display(); // a wall display: paired, never signed in
+
+    const cals = (await app.inject('GET', '/api/calendars')).body as CalendarDTO[];
+    const cal = (name: string) => cals.find((c) => c.name === name)!;
+    const events = (await app.inject('GET', week)).body as EventDTO[];
+    const event = (title: string) => events.find((e) => e.title === title)!;
+    return { provider, sam, robin, display, cal, event };
+  }
+
+  const newEvent = (calendarId: string) => ({
+    calendarId,
+    title: 'Movie night',
+    start: '2026-10-10T23:00:00Z',
+    end: '2026-10-11T01:00:00Z',
+  });
+
+  it('is off for every calendar until an admin turns it on', async () => {
+    const { cal } = await withPeople();
+    expect(cal('Family')).toMatchObject({ writable: true, membersCanEdit: false });
+    expect(cal('Work')).toMatchObject({ writable: true, membersCanEdit: false });
+  });
+
+  it('keeps existing calendars off when upgrading', async () => {
+    const dataDir = tmpDir();
+    const db = new Database(path.join(dataDir, 'hearthboard.db'));
+    // The database as it was before this setting existed.
+    const added = MIGRATIONS.findIndex((m) => String(m).includes('members_can_edit'));
+    MIGRATIONS.slice(0, added).forEach((step, i) => {
+      if (typeof step === 'string') db.exec(step);
+      else step(db);
+      db.pragma(`user_version = ${i + 1}`);
+    });
+    db.prepare("INSERT INTO accounts (id, provider, name) VALUES ('a', 'demo', 'Mom')").run();
+    db.prepare(
+      "INSERT INTO calendars (id, account_id, remote_id, name, writable) VALUES ('c', 'a', '/mom/', 'Personal', 1)",
+    ).run();
+    db.close();
+
+    app = await testApp({ dataDir });
+    await app.login();
+    expect((await app.inject('GET', '/api/calendars')).body).toEqual([
+      expect.objectContaining({ name: 'Personal', writable: true, membersCanEdit: false }),
+    ]);
+  });
+
+  it('refuses a member on a calendar the family cannot edit', async () => {
+    const { provider, sam, cal, event } = await withPeople();
+    const created = await sam.inject('POST', '/api/events', newEvent(cal('Family').id));
+    expect(created.status).toBe(403);
+    expect(created.body.error).toBe(REFUSED);
+
+    const dinner = event('Family dinner');
+    const moved = await sam.inject('PATCH', `/api/events/${dinner.resourceId}`, {
+      start: '2026-10-09T20:00:00Z',
+      end: '2026-10-09T21:00:00Z',
+    });
+    expect(moved.status).toBe(403);
+    expect(moved.body.error).toBe(REFUSED);
+    expect((await sam.inject('DELETE', `/api/events/${dinner.resourceId}`, {})).status).toBe(403);
+
+    // Repeating events: neither "only this one" nor "all events".
+    const trash = event('Trash night');
+    for (const scope of ['instance', 'series']) {
+      const body = { recurrenceId: trash.recurrenceId, scope };
+      const edit = await sam.inject('PATCH', `/api/events/${trash.resourceId}`, {
+        ...body,
+        title: 'x',
+      });
+      expect(edit.status).toBe(403);
+      const del = await sam.inject('DELETE', `/api/events/${trash.resourceId}`, body);
+      expect(del.status).toBe(403);
+    }
+    expect(provider.writes).toEqual([]);
+  });
+
+  it('lets a member change only the calendars an admin opened to the family', async () => {
+    const { provider, sam, cal, event } = await withPeople();
+    const patch = await app!.inject('PATCH', `/api/calendars/${cal('Family').id}`, {
+      membersCanEdit: true,
+    });
+    expect(patch.status).toBe(200);
+    expect(patch.body.find((c: CalendarDTO) => c.name === 'Family').membersCanEdit).toBe(true);
+
+    expect((await sam.inject('POST', '/api/events', newEvent(cal('Family').id))).status).toBe(200);
+    const dinner = event('Family dinner');
+    const moved = await sam.inject('PATCH', `/api/events/${dinner.resourceId}`, {
+      title: 'Late dinner',
+      start: '2026-10-09T20:00:00Z',
+      end: '2026-10-09T21:00:00Z',
+    });
+    expect(moved.status).toBe(200);
+    const trash = event('Trash night');
+    const series = await sam.inject('PATCH', `/api/events/${trash.resourceId}`, {
+      scope: 'series',
+      title: 'Bins out',
+    });
+    expect(series.status).toBe(200);
+    const one = await sam.inject('DELETE', `/api/events/${trash.resourceId}`, {
+      recurrenceId: trash.recurrenceId,
+      scope: 'instance',
+    });
+    expect(one.status).toBe(200);
+    expect((await sam.inject('DELETE', `/api/events/${dinner.resourceId}`, {})).status).toBe(200);
+    expect(provider.writes.map((w) => w.op)).toEqual([
+      'create',
+      'update',
+      'update',
+      'delete',
+      'delete',
+    ]);
+
+    // Work is still closed, and an event is judged by the calendar it lives in.
+    expect((await sam.inject('POST', '/api/events', newEvent(cal('Work').id))).status).toBe(403);
+    const meeting = event('Board meeting');
+    const edit = await sam.inject('PATCH', `/api/events/${meeting.resourceId}`, { title: 'x' });
+    expect(edit.status).toBe(403);
+    expect((await sam.inject('DELETE', `/api/events/${meeting.resourceId}`, {})).status).toBe(403);
+
+    // Turned off again, the family loses access straight away.
+    await app!.inject('PATCH', `/api/calendars/${cal('Family').id}`, { membersCanEdit: false });
+    expect((await sam.inject('POST', '/api/events', newEvent(cal('Family').id))).status).toBe(403);
+  });
+
+  it('never lets anyone change a read-only calendar', async () => {
+    const { sam, robin, cal, event } = await withPeople();
+    const holidays = cal('Holidays');
+    // There is nothing to open up on a calendar nobody can change.
+    const patch = await app!.inject('PATCH', `/api/calendars/${holidays.id}`, {
+      membersCanEdit: true,
+    });
+    expect(patch.status).toBe(400);
+    const holiday = event('Public holiday');
+    for (const who of [app!, robin, sam]) {
+      expect((await who.inject('POST', '/api/events', newEvent(holidays.id))).status).toBe(403);
+      expect((await who.inject('DELETE', `/api/events/${holiday.resourceId}`, {})).status).toBe(
+        403,
+      );
+    }
+  });
+
+  it('always lets an admin change any writable calendar', async () => {
+    const { provider, robin, cal, event } = await withPeople();
+    // Both admins, on calendars the family cannot edit.
+    const meeting = event('Board meeting');
+    for (const admin of [app!, robin]) {
+      const created = await admin.inject('POST', '/api/events', newEvent(cal('Work').id));
+      expect(created.status).toBe(200);
+      const edit = await admin.inject('PATCH', `/api/events/${meeting.resourceId}`, {
+        title: 'Moved',
+      });
+      expect(edit.status).toBe(200);
+    }
+    const dinner = event('Family dinner');
+    expect((await robin.inject('DELETE', `/api/events/${dinner.resourceId}`, {})).status).toBe(200);
+    expect(provider.writes.map((w) => w.op)).toEqual([
+      'create',
+      'update',
+      'create',
+      'update',
+      'delete',
+    ]);
+  });
+
+  it('needs sign-in to change events at all', async () => {
+    const { display, cal, event } = await withPeople();
+    const dinner = event('Family dinner');
+    expect((await display.inject('POST', '/api/events', newEvent(cal('Family').id))).status).toBe(
+      401,
+    );
+    expect((await display.inject('DELETE', `/api/events/${dinner.resourceId}`, {})).status).toBe(
+      401,
+    );
+  });
+
+  it('lets only admins change the setting', async () => {
+    const { sam, robin, display, cal } = await withPeople();
+    const url = `/api/calendars/${cal('Family').id}`;
+    const flag = async () =>
+      ((await app!.inject('GET', '/api/calendars')).body as CalendarDTO[]).find(
+        (c) => c.name === 'Family',
+      )!.membersCanEdit;
+
+    expect((await sam.inject('PATCH', url, { membersCanEdit: true })).status).toBe(403);
+    expect((await display.inject('PATCH', url, { membersCanEdit: true })).status).toBe(401);
+    expect(await flag()).toBe(false);
+
+    const asAdmin = await robin.inject('PATCH', url, { membersCanEdit: true });
+    expect(asAdmin.status).toBe(200);
+    expect(asAdmin.body.find((c: CalendarDTO) => c.name === 'Family').membersCanEdit).toBe(true);
+    expect(await flag()).toBe(true);
+
+    // A member can't switch it back off either.
+    expect((await sam.inject('PATCH', url, { membersCanEdit: false })).status).toBe(403);
+    expect(await flag()).toBe(true);
+  });
+
+  it('tells each viewer what they may edit', async () => {
+    const { sam, robin, display, cal } = await withPeople();
+    await app!.inject('PATCH', `/api/calendars/${cal('Family').id}`, { membersCanEdit: true });
+
+    const seenBy = async (who: typeof sam) => {
+      const cals = (await who.inject('GET', '/api/calendars')).body as CalendarDTO[];
+      const evts = (await who.inject('GET', week)).body as EventDTO[];
+      return {
+        calendars: Object.fromEntries(cals.map((c) => [c.name, c.editable])),
+        events: Object.fromEntries(evts.map((e) => [e.title, e.editable])),
+      };
+    };
+    const all = (editable: boolean) => ({
+      // Read-only calendars stay read-only for everyone.
+      calendars: { Family: editable, Work: editable, Holidays: false },
+      events: {
+        'Family dinner': editable,
+        'Trash night': editable,
+        'Board meeting': editable,
+        'Public holiday': false,
+      },
+    });
+
+    expect(await seenBy(robin)).toEqual(all(true));
+    expect(await seenBy(app!)).toEqual(all(true));
+    // A member: only the calendar opened to the family.
+    expect(await seenBy(sam)).toEqual({
+      calendars: { Family: true, Work: false, Holidays: false },
+      events: {
+        'Family dinner': true,
+        'Trash night': true,
+        'Board meeting': false,
+        'Public holiday': false,
+      },
+    });
+    // A display that isn't signed in can look but not change.
+    expect(await seenBy(display)).toEqual(all(false));
+    // The setting itself is visible to all, so Settings shows the right state.
+    const seen = (await display.inject('GET', '/api/calendars')).body as CalendarDTO[];
+    expect(seen.map((c) => [c.name, c.membersCanEdit])).toEqual([
+      ['Family', true],
+      ['Work', false],
+      ['Holidays', false],
+    ]);
   });
 });

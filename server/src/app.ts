@@ -14,6 +14,7 @@ import type { Config } from './config';
 import { openDb, type DB } from './db';
 import { ensureDemoPhotos, seedDemo } from './demo';
 import { Displays } from './displays';
+import { registerSecurityHeaders } from './headers';
 import { hostAllowed, hostRefusal, publicHost } from './hosts';
 import { LiveHub } from './live';
 import { Meals } from './meals';
@@ -59,8 +60,10 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   const background = opts.background ?? true;
   const app = Fastify({
     logger: opts.logger ?? false,
-    trustProxy: true,
+    trustProxy: config.trustProxy,
     bodyLimit: 5 * 1024 * 1024,
+    // Photo ids carry the photo's path; the default of 100 characters cuts off long ones.
+    routerOptions: { maxParamLength: 1000 },
   });
   const db = openDb(
     config.dataDir === ':memory:' ? ':memory:' : path.join(config.dataDir, 'hearthboard.db'),
@@ -119,7 +122,21 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   );
 
   await app.register(cookie);
-  await app.register(websocket);
+  // Displays only listen; nothing they could send is worth more than a few bytes.
+  await app.register(websocket, { options: { maxPayload: 1024 } });
+
+  // Only this app's own pages may change things. The session cookie is SameSite=Lax, which
+  // still lets a page on the same site (another app on the NAS, on another port) post here.
+  app.addHook('onRequest', async (req, reply) => {
+    const from = req.headers['sec-fetch-site'];
+    if (
+      req.method !== 'GET' &&
+      req.method !== 'HEAD' &&
+      (from === 'same-site' || from === 'cross-site')
+    )
+      return reply.code(403).send({ error: 'Requests from other sites are not allowed.' });
+  });
+  registerSecurityHeaders(app, config.embedOrigins);
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof ZodError) {
@@ -130,7 +147,9 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status < 500) return reply.code(status).send({ error: (err as Error).message });
     req.log.error(err);
-    return reply.code(502).send({ error: (err as Error).message || 'Something went wrong' });
+    // The details (an upstream error, a file path) are for signed-in people only.
+    const message = req.user ? (err as Error).message : '';
+    return reply.code(502).send({ error: message || 'Something went wrong' });
   });
 
   app.get('/api/health', async () => ({ ok: true, demo: config.demo }));

@@ -43,9 +43,15 @@ function bucket(n: unknown, fallback: number): number {
 /** Shuffled deck per source so photos don't repeat until all have been shown. */
 class Deck<T> {
   private order: T[] = [];
-  next(all: T[], same: (a: T, b: T) => boolean): T | undefined {
+  private seen: T[] | null = null;
+  next(all: T[], key: (x: T) => string | number): T | undefined {
     if (!all.length) return undefined;
-    this.order = this.order.filter((x) => all.some((y) => same(x, y)));
+    // Drop photos that are gone, once per new listing (the cached one is the same array).
+    if (all !== this.seen) {
+      const keys = new Set(all.map(key));
+      this.order = this.order.filter((x) => keys.has(key(x)));
+      this.seen = all;
+    }
     if (!this.order.length) {
       this.order = [...all];
       for (let i = this.order.length - 1; i > 0; i--) {
@@ -92,14 +98,33 @@ export class Photos {
 
   private deck(key: string): Deck<unknown> {
     let d = this.decks.get(key);
-    if (!d) this.decks.set(key, (d = new Deck()));
+    if (!d) {
+      if (this.decks.size >= 100) this.decks.clear(); // only ever a few in real use
+      this.decks.set(key, (d = new Deck()));
+    }
     return d;
+  }
+
+  /** Photo ids are signed, so only photos the server handed out can be requested. */
+  private sign(id: string): string {
+    return `${id}.${this.secrets.mac(id)}`;
+  }
+
+  private verify(signed: string): string | null {
+    const dot = signed.lastIndexOf('.');
+    const id = signed.slice(0, dot);
+    const given = Buffer.from(signed.slice(dot + 1));
+    const want = Buffer.from(this.secrets.mac(id));
+    return dot > 0 && given.length === want.length && crypto.timingSafeEqual(given, want)
+      ? id
+      : null;
   }
 
   private albumItems(albumId: string): Promise<SynoItem[]> {
     const cur = this.albumCache.get(albumId);
     if (cur && Date.now() - cur.at < 15 * 60_000) return cur.items;
     const items = this.syno().items(albumId);
+    if (this.albumCache.size >= 100) this.albumCache.clear();
     this.albumCache.set(albumId, { at: Date.now(), items });
     items.catch(() => this.albumCache.delete(albumId));
     return items;
@@ -113,13 +138,11 @@ export class Photos {
     if (source === 'synology') {
       if (!albumId) throw new HttpError(400, 'Pick an album in the widget settings.');
       const items = await this.albumItems(albumId);
-      const it = this.deck(`s:${albumId}`).next(
-        items,
-        (a, b) => (a as SynoItem).id === (b as SynoItem).id,
-      ) as SynoItem | undefined;
+      const it = this.deck(`s:${albumId}`).next(items, (x) => (x as SynoItem).id) as
+        SynoItem | undefined;
       if (!it) return null;
       return {
-        id: 's.' + encode({ u: it.unitId, k: it.cacheKey }),
+        id: this.sign('s.' + encode({ u: it.unitId, k: it.cacheKey })),
         caption: it.time
           ? new Date(it.time * 1000).toLocaleDateString(undefined, {
               month: 'long',
@@ -128,17 +151,21 @@ export class Photos {
           : '',
       };
     }
-    const files = await this.folder.list(folder);
-    const rel = this.deck(`f:${folder}`).next(files, (a, b) => a === b) as string | undefined;
+    const key = this.folder.folderKey(folder);
+    if (key === null) return null;
+    const files = await this.folder.list(key);
+    const rel = this.deck(`f:${key}`).next(files, (x) => x as string) as string | undefined;
     if (!rel) return null;
     return {
-      id: 'f.' + encode(rel),
+      id: this.sign('f.' + encode(rel)),
       caption: path.basename(path.dirname(rel)) === '.' ? '' : path.basename(path.dirname(rel)),
     };
   }
 
   /** Resized JPEG for a photo id, from the disk cache when possible. */
-  async image(id: string, w: number, h: number): Promise<Buffer> {
+  async image(signed: string, w: number, h: number): Promise<Buffer> {
+    const id = this.verify(signed);
+    if (!id) throw new HttpError(404, 'Photo not found');
     const file = path.join(
       this.cacheDir,
       crypto.createHash('sha1').update(`${id}:${w}x${h}`).digest('hex') + '.jpg',
@@ -173,7 +200,7 @@ export class Photos {
     }
     await fs.mkdir(this.cacheDir, { recursive: true });
     await fs.writeFile(file, out);
-    if (++this.writes % 200 === 0) void this.prune();
+    if (++this.writes % 200 === 0) this.prune().catch(() => {}); // e.g. a file already gone
     return out;
   }
 

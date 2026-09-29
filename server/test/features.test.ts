@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LiveMessage } from '@hearthboard/shared';
 import { defaultProviderFactory, syncWindow } from '../src/calendars/service';
 import {
@@ -329,6 +329,29 @@ END:VEVENT
     expect(changed.upserts.map((r) => r.remoteId)).toContain('new');
   });
 
+  it('refreshes the calendar name without downloading an unchanged feed again', async () => {
+    const statuses: number[] = [];
+    const f = (async (_url: string | URL, init: RequestInit = {}) => {
+      const h = (init.headers ?? {}) as Record<string, string>;
+      const res =
+        h['if-none-match'] === '"v1"'
+          ? new Response(null, { status: 304 })
+          : new Response(feed(), { status: 200, headers: { etag: '"v1"' } });
+      statuses.push(res.status);
+      return res;
+    }) as typeof fetch;
+    const p = new IcsFeedProvider({ url: 'webcal://school.example/cal.ics' }, f);
+    const [first] = await p.listCalendars();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 16 * 60_000);
+      expect(await p.listCalendars()).toEqual([first]);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(statuses).toEqual([200, 304]);
+  });
+
   it('subscribes from Settings and shows read-only events', async () => {
     const f = (async () => new Response(feed(), { status: 200 })) as typeof fetch;
     app = await testApp(
@@ -366,6 +389,21 @@ END:VEVENT
     expect(events.every((e) => !e.editable)).toBe(true);
     const edit = await app.inject('PATCH', `/api/events/${events[0].resourceId}`, { title: 'x' });
     expect(edit.status).toBe(403);
+  });
+
+  it('stops downloading a feed as soon as it is too large', async () => {
+    let sent = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(c) {
+        sent += 1 << 20;
+        c.enqueue(new Uint8Array(1 << 20).fill(65));
+      },
+    });
+    // No content-length: the size only shows while reading.
+    const f = (async () => new Response(endless, { status: 200 })) as typeof fetch;
+    const feed = new IcsFeedProvider({ url: 'https://example.com/big.ics' }, f);
+    await expect(feed.listCalendars()).rejects.toThrow(/too large/);
+    expect(sent).toBeLessThan(25 << 20);
   });
 
   it('reports addresses that are not calendars', async () => {
