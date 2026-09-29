@@ -73,6 +73,31 @@ describe('expandIcs', () => {
     ]);
   });
 
+  it('gives up on a rule that can never match instead of hanging', () => {
+    const rule = (r: string) =>
+      [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Test//EN',
+        'BEGIN:VEVENT',
+        'UID:odd-1',
+        'DTSTAMP:20260101T000000Z',
+        'DTSTART:20260105T090000Z',
+        'DTEND:20260105T100000Z',
+        `RRULE:${r}`,
+        'SUMMARY:Odd',
+        'END:VEVENT',
+        'END:VCALENDAR',
+      ].join('\r\n');
+    const win = range('2026-02-01T00:00:00Z', '2030-01-01T00:00:00Z');
+    for (const r of ['FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30', 'FREQ=HOURLY;BYMONTH=4;BYMONTHDAY=31']) {
+      expect(() => expandIcs(rule(r), ...win)).toThrow(/never matches/);
+    }
+    // Rare but real: an hourly rule on leap days still expands.
+    const leap = expandIcs(rule('FREQ=HOURLY;BYMONTH=2;BYMONTHDAY=29;BYHOUR=9'), ...win);
+    expect(leap.map((o) => o.start)).toEqual(['2028-02-29T09:00:00.000Z']);
+  });
+
   it('returns all-day events as dates with an exclusive end', () => {
     const [o] = expandIcs(allDay, ...range('2026-10-01T00:00:00Z', '2026-11-01T00:00:00Z'));
     expect(o).toMatchObject({
