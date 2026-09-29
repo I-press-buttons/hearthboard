@@ -1,19 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { SynologyPhotos } from '../src/photos/synology';
 
-function fakeDsm() {
+/** A pretend DSM. Like the real one it reads its parameters from the URL or a form body. */
+function fakeDsm(password = 'pw') {
   let sidCounter = 0;
   const valid = new Set<string>();
   const log: string[] = [];
-  const f = (async (input: string | URL) => {
+  const requests: { method: string; url: string; api: string }[] = [];
+  const f = (async (input: string | URL, init: RequestInit = {}) => {
     const url = new URL(String(input));
-    const q = url.searchParams;
+    const method = init.method ?? 'GET';
+    const q = method === 'POST' ? new URLSearchParams(String(init.body)) : url.searchParams;
     const api = q.get('api')!;
     log.push(`${api}.${q.get('method')}`);
+    requests.push({ method, url: String(input), api });
     const json = (body: unknown) =>
       new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
     if (api === 'SYNO.API.Auth') {
-      if (q.get('passwd') !== 'pw') return json({ success: false, error: { code: 400 } });
+      if (q.get('passwd') !== password) return json({ success: false, error: { code: 400 } });
       const sid = `sid${++sidCounter}`;
       valid.add(sid);
       return json({ success: true, data: { sid } });
@@ -49,7 +53,7 @@ function fakeDsm() {
       });
     return json({ success: false, error: { code: 102 } });
   }) as typeof fetch;
-  return { f, log, expireAll: () => valid.clear() };
+  return { f, log, requests, expireAll: () => valid.clear() };
 }
 
 describe('SynologyPhotos', () => {
@@ -85,5 +89,40 @@ describe('SynologyPhotos', () => {
       fakeDsm().f,
     );
     await expect(c.albums()).rejects.toThrow(/rejected the username or password/);
+  });
+
+  it('keeps the password and session ID out of the URL', async () => {
+    const dsm = fakeDsm('s3cret');
+    const c = new SynologyPhotos(
+      { url: 'http://nas:5000', username: 'wall', password: 's3cret' },
+      dsm.f,
+    );
+    await c.albums();
+    await c.items('7');
+    await c.thumbnail(11, '11_1');
+    dsm.expireAll();
+    await c.albums(); // signs in a second time
+
+    expect(dsm.requests.length).toBeGreaterThan(4);
+    for (const r of dsm.requests) {
+      expect(r.url).not.toContain('s3cret');
+      expect(r.url).not.toContain('passwd');
+    }
+    // Everything except the thumbnail download is a POST with nothing in the URL.
+    const posts = dsm.requests.filter((r) => r.method === 'POST');
+    expect(posts.map((r) => r.api)).toContain('SYNO.API.Auth');
+    for (const r of posts) expect(new URL(r.url).search).toBe('');
+    expect(dsm.requests.filter((r) => r.method !== 'POST').map((r) => r.api)).toEqual([
+      'SYNO.Foto.Thumbnail',
+    ]);
+  });
+
+  it('sends passwords with special characters intact', async () => {
+    const password = 'p&ss=w0rd+% é#';
+    const c = new SynologyPhotos(
+      { url: 'https://nas:5001', username: 'wall', password },
+      fakeDsm(password).f,
+    );
+    expect(await c.albums()).toHaveLength(1);
   });
 });

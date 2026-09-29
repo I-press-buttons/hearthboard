@@ -47,9 +47,9 @@ describe('timeouts on outside servers', () => {
 
   it('puts a timer on every Synology call', async () => {
     const signals: (AbortSignal | null | undefined)[] = [];
-    const f = (async (url: string | URL, init: RequestInit = {}) => {
+    const f = (async (_url: string | URL, init: RequestInit = {}) => {
       signals.push(init.signal);
-      const login = String(url).includes('method=login');
+      const login = String(init.body).includes('method=login');
       return new Response(
         JSON.stringify({ success: true, data: login ? { sid: 'x' } : { list: [] } }),
       );
