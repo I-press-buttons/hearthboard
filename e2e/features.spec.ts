@@ -1,11 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-
-async function login(page: Page) {
-  const res = await page.request.post('/api/auth/login', {
-    data: { username: 'admin', password: 'e2e admin password' },
-  });
-  expect(res.ok()).toBeTruthy();
-}
+import { login, pairedDisplay } from './helpers';
 
 /** The browser and server run in America/Chicago; this test process may not. */
 const ZONE = 'America/Chicago';
@@ -78,8 +72,7 @@ test('a touch-screen board lets anyone tick its checklist', async ({ page, brows
   const first = (await items())[0];
   expect(first.done).toBe(false);
 
-  const tablet = await (await browser.newContext()).newPage();
-  await tablet.goto('/');
+  const tablet = await pairedDisplay(browser, 'Wall tablet');
   const check = tablet.locator('.list li', { hasText: first.text }).locator('button.check');
   // Read-only until touch-screen mode is on.
   await check.click();
@@ -96,6 +89,7 @@ test('a touch-screen board lets anyone tick its checklist', async ({ page, brows
 
 test('a scheduled board takes over the screen, with notes posted from the Family page', async ({
   page,
+  browser,
 }) => {
   await login(page);
   const morning = await (
@@ -143,8 +137,7 @@ test('a scheduled board takes over the screen, with notes posted from the Family
     data: { ...main, schedule: [{ boardId: morning.id, start: '00:00', end: '23:59' }] },
   });
 
-  const display = await page.context().newPage();
-  await display.goto('/');
+  const display = await pairedDisplay(browser);
   await expect(display.locator('.weather-temp')).toContainText('°');
   await expect(display.locator('.countdown')).toContainText('Beach trip');
   await expect(display.locator('.countdown-num').first()).toContainText('5');

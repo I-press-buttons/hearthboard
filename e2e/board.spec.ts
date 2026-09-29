@@ -1,12 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { timeStep, totpAt } from '../server/src/totp';
-
-async function login(page: Page) {
-  const res = await page.request.post('/api/auth/login', {
-    data: { username: 'admin', password: 'e2e admin password' },
-  });
-  expect(res.ok()).toBeTruthy();
-}
+import { login, pairedDisplay } from './helpers';
 
 async function signIn(page: Page, username: string, password: string) {
   await page.getByLabel('Username').fill(username);
@@ -18,10 +12,9 @@ async function board(page: Page) {
   return (await page.request.get('/api/boards/main')).json();
 }
 
-test('dragging a widget in the editor moves it on an open display', async ({ page, context }) => {
+test('dragging a widget in the editor moves it on a paired display', async ({ page, browser }) => {
   await login(page);
-  const display = await context.newPage();
-  await display.goto('/');
+  const display = await pairedDisplay(browser);
   await expect(display.locator('.clock-time')).toBeVisible();
   const before = await display
     .locator('.react-grid-item', { has: display.locator('.clock') })
