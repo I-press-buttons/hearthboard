@@ -148,10 +148,9 @@ export class Reminders {
   }
 
   register(app: FastifyInstance, auth: Auth, touch: TouchGate = () => false) {
-    app.post<{ Querystring: { token?: string } }>('/api/reminders/ingest', async (req, reply) => {
-      const header =
-        req.headers.authorization ?? (req.query.token ? `Bearer ${req.query.token}` : undefined);
-      if (!auth.checkIngestToken(header))
+    // Header only: a token in the URL would be written to the request log.
+    app.post('/api/reminders/ingest', async (req, reply) => {
+      if (!auth.checkIngestToken(req.headers.authorization))
         return reply.code(401).send({ error: 'Bad or missing token' });
       return { ok: true, ...this.ingest(req.body) };
     });

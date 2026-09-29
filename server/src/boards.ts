@@ -16,6 +16,12 @@ import { HttpError } from './util';
 const newBoardId = () => crypto.randomBytes(4).toString('hex');
 const newWidgetId = () => crypto.randomBytes(6).toString('hex');
 
+const NewBoardInput = z.object({
+  name: z.string().max(100).optional(),
+  copyFrom: z.string().max(64).optional(),
+  layout: z.unknown().optional(),
+});
+
 /** Header a display sends to say which board it's showing (for touch-screen mode). */
 export const BOARD_HEADER = 'x-hearthboard-board';
 
@@ -153,7 +159,7 @@ export class Boards {
     });
 
     app.post('/api/boards', signedIn, async (req) => {
-      const body = (req.body ?? {}) as { name?: string; copyFrom?: string; layout?: unknown };
+      const body = NewBoardInput.parse(req.body ?? {});
       // Import an exported layout (see "Export layout" in Board settings).
       if (body.layout !== undefined) {
         let board: Board;

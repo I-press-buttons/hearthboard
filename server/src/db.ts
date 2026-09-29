@@ -150,6 +150,12 @@ export const MIGRATIONS: (string | ((db: DB) => void))[] = [
     expires_at INTEGER
   );
   `,
+
+  // Indexes for the lookups every display refresh and board list makes.
+  `
+  CREATE INDEX checklist_items_list ON checklist_items(checklist_id, position);
+  CREATE INDEX boards_owner ON boards(owner_id);
+  `,
 ];
 
 export function openDb(file: string): DB {

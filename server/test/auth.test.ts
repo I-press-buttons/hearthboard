@@ -428,6 +428,9 @@ describe('boards per person', () => {
       await samClient.inject('POST', '/api/boards', { name: 'Desk', copyFrom: 'main' })
     ).body;
     expect((await samClient.inject('GET', '/api/boards')).body).toHaveLength(2);
+    for (const bad of [{ copyFrom: {} }, { name: 123 }, { name: 'x'.repeat(101) }]) {
+      expect((await samClient.inject('POST', '/api/boards', bad)).status).toBe(400);
+    }
     expect((await app.inject('GET', `/api/boards/${extra.id}`)).body.widgets).toEqual(main.widgets);
     expect((await samClient.inject('DELETE', `/api/boards/${extra.id}`)).status).toBe(200);
     expect((await samClient.inject('DELETE', `/api/boards/${samBoard.id}`)).status).toBe(400);

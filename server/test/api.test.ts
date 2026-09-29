@@ -146,6 +146,8 @@ describe('reminders ingest', () => {
       (await app.inject('POST', '/api/reminders/ingest', [], { authorization: 'Bearer nope' }))
         .status,
     ).toBe(401);
+    // Only in the header: a token in the URL would end up in the request log.
+    expect((await app.inject('POST', `/api/reminders/ingest?token=${token}`, [])).status).toBe(401);
 
     const res = await app.inject(
       'POST',
