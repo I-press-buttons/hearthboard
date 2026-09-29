@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@playwright/test": "1.56",
+    "@playwright/test": "1.63",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^5.2.0",
     "globals": "^17.12.0",
