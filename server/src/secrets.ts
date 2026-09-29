@@ -9,9 +9,21 @@ import path from 'node:path';
  */
 export class SecretBox {
   private key: Buffer;
+  private macKey: Buffer;
 
   constructor(secret: string) {
     this.key = crypto.createHash('sha256').update(secret).digest();
+    this.macKey = Buffer.from(crypto.hkdfSync('sha256', this.key, '', 'hearthboard mac', 32));
+  }
+
+  /** A short tag proving the server itself issued `value` (e.g. a photo id). */
+  mac(value: string): string {
+    return crypto
+      .createHmac('sha256', this.macKey)
+      .update(value)
+      .digest()
+      .subarray(0, 16)
+      .toString('base64url');
   }
 
   static fromConfig(secret: string | null, dataDir: string): SecretBox {

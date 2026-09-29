@@ -274,6 +274,41 @@ describe('photos (folder source)', () => {
     const id = 'f.' + Buffer.from(JSON.stringify('../hearthboard.db')).toString('base64url');
     expect((await app.inject('GET', `/api/photos/img/${id}`)).status).toBe(404);
   });
+
+  it('only serves photos it handed out, and never hidden or non-image files', async () => {
+    app = await testApp();
+    const root = app.config.photosDir;
+    await jpeg(path.join(root, 'beach.jpg'));
+    await jpeg(path.join(root, '#recycle', 'deleted.jpg'));
+    await jpeg(path.join(root, '.private', 'secret.jpg'));
+    fs.writeFileSync(path.join(root, 'notes.txt'), 'not a photo');
+    fs.symlinkSync(path.join(app.config.dataDir, 'hearthboard.db'), path.join(root, 'db.jpg'));
+
+    const forged = (rel: string) => 'f.' + Buffer.from(JSON.stringify(rel)).toString('base64url');
+    expect((await app.inject('GET', `/api/photos/img/${forged('beach.jpg')}`)).status).toBe(404);
+    for (const rel of ['#recycle/deleted.jpg', '.private/secret.jpg', 'notes.txt', 'db.jpg']) {
+      expect(await app.photos.folder.readable(rel), rel).toBeNull();
+    }
+    expect(await app.photos.folder.readable('./x/../beach.jpg')).toBe(path.join(root, 'beach.jpg'));
+
+    // Hidden folders can't be picked, and every spelling of a folder shares one scan.
+    for (const folder of ['#recycle', '.private', '../', 'x/../#recycle']) {
+      const res = await app.inject('GET', `/api/photos/next?folder=${encodeURIComponent(folder)}`);
+      expect(res.body.id, folder).toBeNull();
+    }
+    expect(app.photos.folder.folderKey('./a/../')).toBe('');
+
+    // Deep folders make long ids; they still have to reach the image route.
+    const deep =
+      'Holidays/2026-07 Summer at the lake with the grandparents/IMG_20260712_153045_HDR.jpg';
+    await jpeg(path.join(root, deep));
+    const next = await app.inject(
+      'GET',
+      `/api/photos/next?folder=${encodeURIComponent(path.dirname(deep))}`,
+    );
+    expect(next.body.id.length).toBeGreaterThan(100);
+    expect((await app.inject('GET', `/api/photos/img/${next.body.id}`)).status).toBe(200);
+  });
 });
 
 describe('calendar write-back', () => {

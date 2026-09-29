@@ -58,6 +58,8 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     logger: opts.logger ?? false,
     trustProxy: config.trustProxy,
     bodyLimit: 5 * 1024 * 1024,
+    // Photo ids carry the photo's path; the default of 100 characters cuts off long ones.
+    routerOptions: { maxParamLength: 1000 },
   });
   const db = openDb(
     config.dataDir === ':memory:' ? ':memory:' : path.join(config.dataDir, 'hearthboard.db'),
