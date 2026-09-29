@@ -58,7 +58,8 @@ Click **Next** and **Done**. Container Manager pulls the image and starts it.
   General**: the time zone starts as your phone's or PC's; change it there if
   needed, along with how often calendars sync.
 - **The wall display:** `http://<nas-ip>:8080/` on the screen that hangs on the
-  wall.
+  wall. The first time, it shows a code to pair it with (see
+  [Pairing a TV](#pairing-a-tv) below).
 
 If the DSM firewall is on, allow TCP port 8080 from your local network
 (Control Panel → Security → Firewall).
@@ -84,12 +85,14 @@ them from their edges. The wall display updates immediately.
 
 ## Putting it on the wall
 
-Any screen with a modern browser works. Open `http://<nas-ip>:8080/`, make the
-browser full-screen, and stop the screen from sleeping:
+Any screen with a modern browser works. Open `http://<nas-ip>:8080/`, pair it
+(next section), make the browser full-screen, and stop the screen from
+sleeping:
 
 - **Fire TV / Android TV:** a kiosk browser such as _Fully Kiosk Browser_, with
   the start URL set to the board and "Keep screen on" enabled.
-- **Raspberry Pi + monitor:** `chromium --kiosk --noerrdialogs --incognito http://<nas-ip>:8080/`
+- **Raspberry Pi + monitor:** `chromium --kiosk --noerrdialogs http://<nas-ip>:8080/`
+  (not `--incognito`: it forgets the pairing every time the browser closes)
 - **iPad / tablet:** open the page in Safari, _Share → Add to Home Screen_, then
   set Auto-Lock to Never and use Guided Access. Turn on **Touch screen** in the
   board settings so the family can tick off chores and reminders on it without
@@ -105,6 +108,39 @@ Turn on **Dim the screen at night** in the board settings to darken the
 display between two times. The display also nudges itself a pixel or two
 every few minutes to avoid burn-in, and reloads once a night to pick up
 updates.
+
+## Pairing a TV
+
+Boards are private: only signed-in people and screens you've paired can see
+them. A screen that isn't paired shows **Pair this screen** and a code such as
+`K7QM-4TWX`, big enough to read from the sofa. You pair each screen once:
+
+1. Open `http://<nas-ip>:8080/` on the TV. It shows the code.
+2. On your phone or PC, open **Settings → Displays**, enter the code, name the
+   screen (_Kitchen TV_) and press **Pair**.
+3. Within a few seconds the TV shows the board. It stays paired, even after a
+   restart.
+
+Typing on a TV remote is painful, and that's why the code is short and the
+letters are unmistakable (no `0`/`O` or `1`/`I`). The code runs out after 10
+minutes and a new one appears by itself.
+
+- **Pair it in the browser that will show the board.** The pairing is a cookie
+  in that browser. A kiosk browser in private or incognito mode forgets it when
+  it closes, and an iPad's Home Screen app keeps its own cookies apart from
+  Safari's: open the Home Screen app and pair there.
+- **Prefer a link to a code?** In **Displays**, choose **Pair with a link
+  instead**, name the screen, and open the link it makes on the screen (paste it
+  into the browser's address bar, or send it to the device). The link works
+  once and runs out after a day.
+- **Taking a screen away:** remove it under **Displays**. It's turned away at
+  once and goes back to showing a code.
+- **After updating from an earlier version,** each screen shows a code until you
+  pair it once.
+- **Don't want to pair anything?** Turn on **Show boards on any device** under
+  **Displays**. Then anyone who can reach the NAS can see your calendar,
+  reminders and photos without signing in, so only do it on a network you trust
+  and don't publish the address to the internet.
 
 ## Updating
 

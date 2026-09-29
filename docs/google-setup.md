@@ -52,6 +52,9 @@ reverse proxy with a Let's Encrypt certificate for `board.you.synology.me`):
 1. In Hearthboard, open **Settings → General**, enter
    `https://board.you.synology.me` as the public HTTPS address (or click
    **Use this address** when you've opened Settings through it), and **Save**.
+   This also tells Hearthboard to answer to that name; without it, a request
+   for an address it doesn't know is refused (see `HEARTHBOARD_ALLOWED_HOSTS` in
+   the README).
 2. Make the OAuth client a **Web application** instead of a Desktop app, and
    add `https://board.you.synology.me/api/google/callback` as an authorized
    redirect URI.

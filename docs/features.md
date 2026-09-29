@@ -250,19 +250,39 @@ The board is read-only on screens by default. TVs don't sign in, so a tap can't 
 With touch-screen mode, a tablet on the wall (an iPad, a Fire tablet, a touch monitor) lets
 anyone at it **tick off checklist items and reminders** without signing in.
 
+**Pairing a TV or tablet**
+
+Boards are private: only signed-in people and screens an admin has **paired** can see them, and
+that includes a touch-screen tablet. A screen that isn't paired shows **Pair this screen** and a
+short code such as `K7QM-4TWX`:
+
+1. Open the board's address on the screen. It shows the code.
+2. On a phone or PC, open **Settings → Displays**, enter the code, name the screen (_Kitchen TV_)
+   and press **Pair**. The screen loads the board within a few seconds and stays paired.
+
+Codes run out after 10 minutes and the screen shows a fresh one. **Pair with a link instead**
+makes a link that pairs whichever browser opens it, once, within a day. Under **Displays** you
+can rename or remove a screen (it's turned away at once). After updating from an earlier
+version, every screen has to be paired once. **Show boards on any device** brings back the old
+open behavior; it lets anyone who can reach Hearthboard see your boards, so leave it off unless
+the network is yours alone. There's a step-by-step version in the
+[Synology guide](synology-install.md#pairing-a-tv).
+
 **Turn it on**
 
 1. **Layout → ⚙︎ Board → Touch screen**.
 2. Tick **Anyone at the screen can tick checklists and reminders (no sign-in)**.
 3. Optionally tick **Keep the screen awake** so the tablet doesn't go to sleep.
 4. Open the board on the tablet (`http://<nas>:8080/?board=<id>`, shown at the bottom of Board
-   settings).
+   settings) and pair it, if it isn't paired yet.
 
 **What's allowed and what isn't**
 
 - Only ticking and unticking, and only on checklists and reminder lists that board actually
   shows. Adding, renaming or deleting still needs a sign-in, and so do other boards'
   checklists.
+- Only from a paired screen (or any device, if you allowed that under **Displays**), and only
+  for a board with touch-screen mode on.
 - The server checks every tick against the board, so turning the option off takes effect
   immediately.
 - Ticking a reminder works the same as on your phone: the iPhone Shortcut completes it on its
@@ -365,22 +385,26 @@ An admin chooses which calendars the family may change:
 
 ## For the curious: new API endpoints
 
-Everything above goes through the same JSON API the web app uses. "Public" means screens can
-call it without signing in, like the rest of the display.
+Everything above goes through the same JSON API the web app uses. "Screen" means a paired
+screen, or anyone signed in: the display's reads need one of those. "Public" means anyone.
 
 | Method and path               | Who             | What                                                             |
 | ----------------------------- | --------------- | ---------------------------------------------------------------- |
-| `GET /api/weather?lat=&lon=`  | public          | Forecast for a place (cached 15 minutes)                         |
+| `GET /api/weather?lat=&lon=`  | screen          | Forecast for a place (cached 15 minutes)                         |
 | `GET /api/weather/places?q=`  | signed in       | Look up a place by name                                          |
-| `GET /api/meals?start=&days=` | public          | Meals from `start` (YYYY-MM-DD, default today) for `days` (≤ 62) |
+| `GET /api/meals?start=&days=` | screen          | Meals from `start` (YYYY-MM-DD, default today) for `days` (≤ 62) |
 | `PUT /api/meals/:date/:slot`  | signed in       | `{ "text": "Tacos" }`; empty text clears it                      |
-| `GET /api/notes`              | public          | Current notes, newest first                                      |
+| `GET /api/notes`              | screen          | Current notes, newest first                                      |
 | `POST /api/notes`             | signed in       | `{ "text", "color", "expiresInHours" }` (null = keep up)         |
 | `DELETE /api/notes/:id`       | author or admin | Take a note down                                                 |
 | `POST /api/accounts/ics`      | admin           | `{ "url", "name"? }` subscribe to a calendar feed                |
 | `PATCH /api/calendars/:id`    | admin           | `{ "membersCanEdit": true }` lets family members change events   |
 | `POST /api/boards`            | signed in       | `{ "layout": <exported file> }` imports a layout as a new board  |
+| `POST /api/displays/pair`     | public          | A screen asks for a pairing code and a cookie                    |
+| `POST /api/displays/approve`  | admin           | `{ "code", "name" }` pairs the screen showing that code          |
+| `POST /api/displays`          | admin           | `{ "name" }` makes a screen and a one-time link                  |
 
 Touch-screen boards send an `X-Hearthboard-Board: <board id>` header. The server lets a request
-through without a sign-in only when that board has touch-screen mode on, the request only ticks
-or unticks (`{ "done": true }`), and the checklist or reminder list is on that board.
+through without a sign-in only when the screen is paired, that board has touch-screen mode on, the
+request only ticks or unticks (`{ "done": true }`), and the checklist or reminder list is on that
+board.
