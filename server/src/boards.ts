@@ -1,9 +1,14 @@
 import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { Board, type WidgetInstance } from '@hearthboard/shared';
+import { z } from 'zod';
+import { Board, type BoardSummary, type WidgetInstance } from '@hearthboard/shared';
 import type { DB } from './db';
 import type { LiveHub } from './live';
 import type { Auth } from './auth';
+import type { UserRow } from './users';
+import { HttpError } from './util';
+
+const newBoardId = () => crypto.randomBytes(4).toString('hex');
 
 export function defaultWidgets(checklistId: string): WidgetInstance[] {
   const id = () => crypto.randomBytes(6).toString('hex');
@@ -23,12 +28,22 @@ export class Boards {
     private live: LiveHub,
   ) {}
 
-  list(): { id: string; name: string }[] {
-    return (
-      this.db.prepare('SELECT data FROM boards ORDER BY rowid').all() as { data: string }[]
-    ).map((r) => {
+  /** Everyone's boards for an admin, otherwise just the user's own. */
+  list(user: UserRow): BoardSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT b.data, b.owner_id, u.name AS owner_name FROM boards b
+         LEFT JOIN users u ON u.id = b.owner_id
+         WHERE ? = 'admin' OR b.owner_id = ? ORDER BY b.rowid`,
+      )
+      .all(user.role, user.id) as {
+      data: string;
+      owner_id: string | null;
+      owner_name: string | null;
+    }[];
+    return rows.map((r) => {
       const b = JSON.parse(r.data) as Board;
-      return { id: b.id, name: b.name };
+      return { id: b.id, name: b.name, ownerId: r.owner_id, ownerName: r.owner_name };
     });
   }
 
@@ -38,67 +53,122 @@ export class Boards {
     return row ? Board.parse(JSON.parse(row.data)) : null;
   }
 
+  private owner(id: string): { owner_id: string | null } | undefined {
+    return this.db.prepare('SELECT owner_id FROM boards WHERE id = ?').get(id) as
+      { owner_id: string | null } | undefined;
+  }
+
+  /** 404 if the board doesn't exist, 403 unless it's the user's own or they're an admin. */
+  private checkAccess(user: UserRow, id: string) {
+    const row = this.owner(id);
+    if (!row) throw new HttpError(404, 'No such board');
+    if (user.role !== 'admin' && row.owner_id !== user.id)
+      throw new HttpError(403, "That's someone else's board.");
+    return row;
+  }
+
   save(board: Board): Board {
     const parsed = Board.parse(board);
     this.db
-      .prepare(
-        `INSERT INTO boards (id, data, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
-      )
-      .run(parsed.id, JSON.stringify(parsed), Date.now());
+      .prepare('UPDATE boards SET data = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(parsed), Date.now(), parsed.id);
     this.live.publish('board', parsed.id);
     return parsed;
+  }
+
+  create(ownerId: string | null, board: Board): Board {
+    const parsed = Board.parse(board);
+    this.db
+      .prepare('INSERT INTO boards (id, data, updated_at, owner_id) VALUES (?, ?, ?, ?)')
+      .run(parsed.id, JSON.stringify(parsed), Date.now(), ownerId);
+    this.live.publish('board', parsed.id);
+    return parsed;
+  }
+
+  /** A new user's first board, with the usual widgets. */
+  createStarter(ownerId: string, name: string, checklistId: string): Board {
+    return this.create(
+      ownerId,
+      Board.parse({ id: newBoardId(), name, widgets: defaultWidgets(checklistId) }),
+    );
+  }
+
+  transfer(fromId: string, toId: string) {
+    this.db.prepare('UPDATE boards SET owner_id = ? WHERE owner_id = ?').run(toId, fromId);
+    this.live.publish('board');
   }
 
   /** Create the first board on a fresh install. */
   ensureDefault(checklistId: string) {
     const count = (this.db.prepare('SELECT COUNT(*) AS n FROM boards').get() as { n: number }).n;
     if (count === 0) {
-      this.save(Board.parse({ id: 'main', name: 'Home', widgets: defaultWidgets(checklistId) }));
+      const admin = this.db
+        .prepare("SELECT id FROM users WHERE role = 'admin' ORDER BY created_at, rowid LIMIT 1")
+        .get() as { id: string } | undefined;
+      this.create(
+        admin?.id ?? null,
+        Board.parse({ id: 'main', name: 'Home', widgets: defaultWidgets(checklistId) }),
+      );
     }
   }
 
   register(app: FastifyInstance, auth: Auth) {
-    app.get('/api/boards', async () => this.list());
+    const signedIn = { preHandler: auth.guard };
 
+    app.get('/api/boards', signedIn, async (req) => this.list(req.user!));
+
+    // Public, like the rest of the display: TVs show a board without signing in.
     app.get<{ Params: { id: string } }>('/api/boards/:id', async (req, reply) => {
       const board = this.get(req.params.id);
       return board ?? reply.code(404).send({ error: 'No such board' });
     });
 
-    app.put<{ Params: { id: string } }>(
-      '/api/boards/:id',
-      { preHandler: auth.guard },
-      async (req) => {
-        const board = Board.parse({ ...(req.body as object), id: req.params.id });
-        return this.save(board);
-      },
-    );
+    app.put<{ Params: { id: string } }>('/api/boards/:id', signedIn, async (req) => {
+      this.checkAccess(req.user!, req.params.id);
+      const board = Board.parse({ ...(req.body as object), id: req.params.id });
+      return this.save(board);
+    });
 
-    app.post('/api/boards', { preHandler: auth.guard }, async (req) => {
+    app.post('/api/boards', signedIn, async (req) => {
       const body = (req.body ?? {}) as { name?: string; copyFrom?: string };
       const base = body.copyFrom ? this.get(body.copyFrom) : null;
-      const id = crypto.randomBytes(4).toString('hex');
-      return this.save(
+      return this.create(
+        req.user!.id,
         Board.parse({
           ...(base ?? {}),
-          id,
+          id: newBoardId(),
           name: body.name || 'New board',
           widgets: base?.widgets ?? [],
         }),
       );
     });
 
-    app.delete<{ Params: { id: string } }>(
-      '/api/boards/:id',
-      { preHandler: auth.guard },
-      async (req, reply) => {
-        if (this.list().length <= 1)
-          return reply.code(400).send({ error: 'Keep at least one board.' });
-        this.db.prepare('DELETE FROM boards WHERE id = ?').run(req.params.id);
+    // Admins can hand a board to someone else, e.g. set one up for a child.
+    app.put<{ Params: { id: string } }>(
+      '/api/boards/:id/owner',
+      { preHandler: auth.adminGuard },
+      async (req) => {
+        const { ownerId } = z.object({ ownerId: z.string().min(1) }).parse(req.body);
+        this.checkAccess(req.user!, req.params.id);
+        if (!this.db.prepare('SELECT 1 FROM users WHERE id = ?').get(ownerId))
+          throw new HttpError(400, 'No such user');
+        this.db.prepare('UPDATE boards SET owner_id = ? WHERE id = ?').run(ownerId, req.params.id);
         this.live.publish('board', req.params.id);
         return { ok: true };
       },
     );
+
+    app.delete<{ Params: { id: string } }>('/api/boards/:id', signedIn, async (req) => {
+      const { owner_id } = this.checkAccess(req.user!, req.params.id);
+      const left = (
+        this.db.prepare('SELECT COUNT(*) AS n FROM boards WHERE owner_id IS ?').get(owner_id) as {
+          n: number;
+        }
+      ).n;
+      if (left <= 1) throw new HttpError(400, 'Keep at least one board.');
+      this.db.prepare('DELETE FROM boards WHERE id = ?').run(req.params.id);
+      this.live.publish('board', req.params.id);
+      return { ok: true };
+    });
   }
 }

@@ -3,6 +3,8 @@ import {
   WIDGET_DEFAULT_SIZE,
   WIDGET_TYPES,
   type Board,
+  type BoardSummary,
+  type UserDTO,
   type WidgetInstance,
   type WidgetType,
 } from '@hearthboard/shared';
@@ -10,6 +12,7 @@ import { api } from '../api';
 import { BoardCanvas } from '../board/BoardCanvas';
 import { BoardSettings } from '../board/BoardSettings';
 import { WidgetSettings } from '../board/WidgetSettings';
+import { useMe } from '../components/Auth';
 import { TopBar } from '../components/TopBar';
 import { useLive } from '../live';
 import { WIDGETS, WidgetView } from '../widgets/registry';
@@ -44,11 +47,19 @@ export function findSpot(
 
 type SaveState = 'saved' | 'saving' | 'dirty' | 'error';
 
+/** The board to open: the one in the URL if it's yours to edit, else "main", else your first. */
+export function pickBoard(boards: BoardSummary[], wanted: string | null): string | null {
+  const ids = boards.map((b) => b.id);
+  if (wanted && ids.includes(wanted)) return wanted;
+  return ids.includes('main') ? 'main' : (ids[0] ?? null);
+}
+
 export function Editor() {
-  const [boards, setBoards] = useState<{ id: string; name: string }[]>([]);
-  const [boardId, setBoardId] = useState(
-    () => new URLSearchParams(location.search).get('board') || 'main',
-  );
+  const { user } = useMe();
+  const admin = user.role === 'admin';
+  const [boards, setBoards] = useState<BoardSummary[] | null>(null);
+  const [people, setPeople] = useState<UserDTO[]>([]);
+  const [boardId, setBoardId] = useState<string | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [panel, setPanel] = useState<'widget' | 'board' | null>(null);
@@ -59,14 +70,21 @@ export function Editor() {
   const saveState = useRef<SaveState>('saved');
   saveState.current = save;
 
-  const loadBoards = () => api.get<{ id: string; name: string }[]>('/api/boards').then(setBoards);
+  const loadBoards = () => api.get<BoardSummary[]>('/api/boards').then(setBoards);
   const loadBoard = (id = boardId) =>
-    api.get<Board>(`/api/boards/${id}`).then(setBoard, (e: Error) => setError(e.message));
+    id && api.get<Board>(`/api/boards/${id}`).then(setBoard, (e: Error) => setError(e.message));
 
   useEffect(() => {
     void loadBoards();
-  }, []);
+    if (admin) void api.get<UserDTO[]>('/api/users').then(setPeople);
+  }, [admin]);
+  // Once the list is in, open the board from the URL (if it's ours) or our first one.
   useEffect(() => {
+    if (boards && !boardId)
+      setBoardId(pickBoard(boards, new URLSearchParams(location.search).get('board')));
+  }, [boards, boardId]);
+  useEffect(() => {
+    if (!boardId) return;
     setSelected(null);
     setPanel(null);
     void loadBoard(boardId);
@@ -100,6 +118,8 @@ export function Editor() {
     }, 500);
   };
 
+  if (boards && !boards.length)
+    return <div className="widget-empty">You don't have a board yet. Ask an admin for one.</div>;
   if (!board) return <div className="widget-empty">{error ?? 'Loading…'}</div>;
 
   // On a portrait phone, size the canvas to the board so the space below stays usable.
@@ -143,25 +163,47 @@ export function Editor() {
   const deleteBoard = async () => {
     if (!confirm(`Delete the board “${board.name}”?`)) return;
     await api.del(`/api/boards/${board.id}`);
-    await loadBoards();
-    setBoardId('main');
+    const left = await api.get<BoardSummary[]>('/api/boards');
+    setBoards(left);
+    setBoardId(pickBoard(left, null));
   };
+
+  const setOwner = async (ownerId: string) => {
+    await api.put(`/api/boards/${board.id}/owner`, { ownerId });
+    await loadBoards();
+  };
+
+  const list = boards ?? [];
+  const current = list.find((b) => b.id === board.id);
+  // Admins see everyone's boards, grouped by whose they are.
+  const owners = [...new Set(list.map((b) => b.ownerId))];
+  const option = (b: BoardSummary) => (
+    <option key={b.id} value={b.id}>
+      {b.name}
+    </option>
+  );
 
   return (
     <div className="app">
       <TopBar active="edit">
         <select
-          value={boardId}
+          value={boardId ?? board.id}
           onChange={(e) =>
             e.target.value === '__new' ? void newBoard() : setBoardId(e.target.value)
           }
-          style={{ width: 'auto', maxWidth: 160 }}
+          style={{ width: 'auto', maxWidth: 180 }}
         >
-          {boards.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
+          {owners.length > 1
+            ? owners.map((o) => {
+                const theirs = list.filter((b) => b.ownerId === o);
+                const label = o === user.id ? 'My boards' : (theirs[0].ownerName ?? 'Nobody');
+                return (
+                  <optgroup key={o ?? ''} label={label}>
+                    {theirs.map(option)}
+                  </optgroup>
+                );
+              })
+            : list.map(option)}
           <option value="__new">+ New board…</option>
         </select>
         <div style={{ position: 'relative' }}>
@@ -272,7 +314,16 @@ export function Editor() {
               board={board}
               onChange={update}
               onClose={() => setPanel(null)}
-              onDelete={boards.length > 1 ? () => void deleteBoard() : undefined}
+              onDelete={
+                list.filter((b) => b.ownerId === current?.ownerId).length > 1
+                  ? () => void deleteBoard()
+                  : undefined
+              }
+              owner={
+                admin && current
+                  ? { id: current.ownerId, people, onChange: (id) => void setOwner(id) }
+                  : undefined
+              }
             />
           </div>
         )}

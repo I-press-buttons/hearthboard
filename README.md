@@ -27,6 +27,9 @@ phone or PC.
 - **Everything moves and resizes.** Drag widgets around a grid, stretch them
   to any size, and make several boards (kitchen, kids' room, portrait tablet).
   The TV updates the moment you let go.
+- **A sign-in for each person, with two-step sign-in.** Everyone in the family
+  gets their own username, password and boards. Codes from an authenticator app
+  can be required on top of the password.
 - **Made for a wall:** seven color themes, five text sizes (per board or per widget), optional night dimming, burn-in
   protection, reconnects by itself, and reloads nightly to pick up updates.
 
@@ -38,9 +41,9 @@ phone or PC.
 
 The short version: in **Container Manager → Project → Create**, paste
 [`docker-compose.yml`](docker-compose.yml), then set your `PUID`/`PGID` and
-the path to your photos. Then open `http://<nas-ip>:8080/edit`, choose a PIN,
-and set everything else (time zone, accounts, sync interval) under
-**Settings**.
+the path to your photos. Then open `http://<nas-ip>:8080/edit`, create your
+sign-in, and set everything else (time zone, accounts, sync interval, people)
+under **Settings**.
 
 The step-by-step guide, including how to find your user ID and how to put the
 board on a Fire TV, Raspberry Pi or iPad, is in
@@ -60,42 +63,94 @@ environment.
 
 ## Pages
 
-| URL         | What it's for                                                                                           |
-| ----------- | ------------------------------------------------------------------------------------------------------- |
-| `/`         | The wall display. Read-only, no login. `/?board=<id>` shows another board.                              |
-| `/edit`     | Arrange widgets: drag the ⠿ pill to move, drag edges to resize, ⚙︎ for board settings.                   |
-| `/calendar` | Full calendar: drag to move, stretch to resize, select a time range to create, click to edit or delete. |
-| `/settings` | Time zone, sync interval, calendars, the reminders Shortcut, Synology Photos, checklists, verses, PIN.  |
+| URL         | What it's for                                                                                                    |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| `/`         | The wall display. Read-only, no login. `/?board=<id>` shows another board.                                       |
+| `/edit`     | Arrange widgets: drag the ⠿ pill to move, drag edges to resize, ⚙︎ for board settings.                            |
+| `/calendar` | Full calendar: drag to move, stretch to resize, select a time range to create, click to edit or delete.          |
+| `/settings` | Your account and two-step sign-in, people, time zone and sync, calendars, reminders, photos, checklists, verses. |
 
-Anyone on your network can look at the board. Changing anything needs the
-admin PIN, which you choose on first visit.
+Anyone on your network can look at a board: TVs don't sign in. Changing
+anything needs a sign-in.
+
+## People and sign-in
+
+The first visit to `/edit` creates your sign-in, and you become the **admin**.
+Add everyone else under **Settings → People**. Each person gets:
+
+- **Their own username and password.** Passwords are at least 8 characters.
+- **Their own board**, named after them, which they can rearrange and copy.
+  Show it on a screen with `/?board=<id>` (Board settings shows the address).
+  Members see and edit only their own boards; admins see everyone's, can help
+  arrange them, and can hand a board to someone else ("Belongs to" in Board
+  settings).
+- **A role.** _Members_ can arrange their boards, edit the calendar, tick
+  reminders and manage checklists and verses. _Admins_ can also add and remove
+  people, connect calendar accounts and Synology Photos, and see the reminders
+  token.
+
+Calendars, reminders, photos and checklists are shared by the household. To
+give someone a board with just their calendar, pick it under the calendar
+widget's settings.
+
+### Two-step sign-in
+
+Under **Settings → My account → Two-step sign-in**, scan the QR code with an
+authenticator app: the iPhone's Passwords app, Google Authenticator, Microsoft
+Authenticator, 1Password and others all work. From then on, signing in asks for
+the app's 6-digit code after the password.
+
+- You get 10 **recovery codes** when you turn it on. Each one signs you in once
+  if you lose your phone. Save them somewhere safe.
+- An admin can require it for everyone (**Settings → People**). Anyone signed in
+  without it is signed out, and sets it up the next time they sign in.
+- If someone loses their phone and their recovery codes, an admin can turn their
+  two-step sign-in off (**People → Edit**) so they can set it up again.
+- **Locked out as the only admin?** Set `HEARTHBOARD_ADMIN_PASSWORD` to a new
+  password and `HEARTHBOARD_RESET_ADMIN: "1"` in the container's environment,
+  then restart it. The `admin` user gets that password with two-step sign-in
+  off. Then remove `HEARTHBOARD_RESET_ADMIN` again.
+
+### Upgrading from the admin PIN
+
+Earlier versions had a single admin PIN. After upgrading, sign in with the
+username **`admin`** and your old PIN as the password; that user owns all your
+existing boards. Then change the password (**Settings → My account**), rename
+yourself if you like (**Settings → People → Edit**), and add the rest of the
+family. Every device is signed
+out once by the upgrade. TVs showing the board aren't affected.
 
 ## Configuration
 
 Accounts and settings live in the web app under **Settings**, not in Docker:
 
-- **General:** time zone, how often calendars sync, and the public HTTPS
-  address used for Google sign-in.
-- **Calendars, Apple Reminders, Photos:** every account sign-in.
-- **Admin PIN:** change it or log out.
+- **My account:** your password, two-step sign-in, signing out.
+- **People** (admins): add, change and remove people; require two-step
+  sign-in.
+- **General** (admins): time zone, how often calendars sync, and the public
+  HTTPS address used for Google sign-in.
+- **Calendars, Apple Reminders, Photos** (admins): every account sign-in.
 
 They're stored in `/data` and survive container updates. The time zone
-starts as the one of the device you first set the PIN from.
+starts as the one of the device you created the first account on.
 
 Docker only needs what the container itself requires:
 
-| Variable             | Default         | Meaning                                                                                   |
-| -------------------- | --------------- | ----------------------------------------------------------------------------------------- |
-| `PUID` / `PGID`      | `1000` / `1000` | User and group the server runs as (Synology: usually `1026` / `100`).                     |
-| `PORT`               | `8080`          | HTTP port.                                                                                |
-| `HEARTHBOARD_DATA`   | `/data`         | Database, encryption key and image cache.                                                 |
-| `HEARTHBOARD_PHOTOS` | `/photos`       | Photo folder (mount it read-only).                                                        |
-| `HEARTHBOARD_SECRET` | (generated)     | Key for encrypting stored credentials. By default one is generated in `/data/secret.key`. |
-| `HEARTHBOARD_DEMO`   | (off)           | `1` loads sample calendars, reminders and photos.                                         |
+| Variable                     | Default         | Meaning                                                                                                                                              |
+| ---------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PUID` / `PGID`              | `1000` / `1000` | User and group the server runs as (Synology: usually `1026` / `100`).                                                                                |
+| `PORT`                       | `8080`          | HTTP port.                                                                                                                                           |
+| `HEARTHBOARD_DATA`           | `/data`         | Database, encryption key and image cache.                                                                                                            |
+| `HEARTHBOARD_PHOTOS`         | `/photos`       | Photo folder (mount it read-only).                                                                                                                   |
+| `HEARTHBOARD_SECRET`         | (generated)     | Key for encrypting stored credentials. By default one is generated in `/data/secret.key`.                                                            |
+| `HEARTHBOARD_DEMO`           | (off)           | `1` loads sample calendars, reminders and photos.                                                                                                    |
+| `HEARTHBOARD_ADMIN_PASSWORD` | (none)          | Optional. On first start, create an `admin` user with this password instead of setting one up on first visit. Ignored once anyone has signed up.     |
+| `HEARTHBOARD_RESET_ADMIN`    | (off)           | Recovery only: `1` resets the `admin` user to `HEARTHBOARD_ADMIN_PASSWORD` with two-step sign-in off, on every start. Remove it once you're back in. |
 
-Older compose files that still set `TZ`, `HEARTHBOARD_SYNC_INTERVAL`,
-`HEARTHBOARD_PUBLIC_URL` or `HEARTHBOARD_PIN` keep working: those values are
-used only until you change the setting in the web app, and can be removed.
+Older compose files that still set `TZ`, `HEARTHBOARD_SYNC_INTERVAL` or
+`HEARTHBOARD_PUBLIC_URL` keep working: those values are used only until you
+change the setting in the web app, and can be removed. `HEARTHBOARD_PIN` works
+like `HEARTHBOARD_ADMIN_PASSWORD`.
 
 ## Themes and text sizes
 
@@ -139,7 +194,12 @@ point at a theme or size you later remove fall back to the defaults.
   and scaled to fit whatever screen shows it.
 - **Security:**
   - Passwords and tokens are encrypted at rest (AES-256-GCM).
-  - The admin PIN is hashed with scrypt, and login attempts are rate-limited.
+  - Passwords are hashed with scrypt, and sign-in attempts are rate-limited.
+  - Two-step sign-in uses standard TOTP (RFC 6238) codes, each accepted once.
+    Authenticator secrets are encrypted at rest, and recovery codes are stored
+    hashed.
+  - Sessions are stored hashed. Changing a password or turning on two-step
+    sign-in signs out your other devices.
   - The reminders endpoint uses its own token.
   - The container runs as your user, and the photo mount is read-only.
 

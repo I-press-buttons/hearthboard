@@ -53,7 +53,8 @@ Click **Next** and **Done**. Container Manager pulls the image and starts it.
 ## 4. Open it
 
 - **Settings and layout:** `http://<nas-ip>:8080/edit` from a phone or PC. The
-  first visit asks you to choose an admin PIN. Then check **Settings →
+  first visit asks you to create your sign-in; you become the admin and can add
+  the rest of the family under **Settings → People**. Then check **Settings →
   General**: the time zone starts as your phone's or PC's; change it there if
   needed, along with how often calendars sync.
 - **The wall display:** `http://<nas-ip>:8080/` on the screen that hangs on the

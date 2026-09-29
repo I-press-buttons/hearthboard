@@ -13,33 +13,6 @@ afterEach(async () => {
   app = null;
 });
 
-describe('auth', () => {
-  it('sets a PIN once, then requires it for writes', async () => {
-    app = await testApp();
-    expect((await app.inject('GET', '/api/auth/status')).body).toEqual({
-      authenticated: false,
-      pinSet: false,
-    });
-    expect((await app.inject('PUT', '/api/boards/main', {})).status).toBe(401);
-
-    expect((await app.inject('POST', '/api/auth/setup', { pin: '12' })).status).toBe(400);
-    expect((await app.inject('POST', '/api/auth/setup', { pin: '4321' })).status).toBe(200);
-    expect((await app.inject('GET', '/api/auth/status')).body.authenticated).toBe(true);
-    // A second setup is refused.
-    expect((await app.inject('POST', '/api/auth/setup', { pin: '9999' })).status).toBe(409);
-
-    app.logout();
-    expect((await app.inject('POST', '/api/auth/login', { pin: '0000' })).status).toBe(401);
-    expect((await app.inject('POST', '/api/auth/login', { pin: '4321' })).status).toBe(200);
-  });
-
-  it('locks out after repeated wrong PINs', async () => {
-    app = await testApp({ adminPin: '2468' });
-    for (let i = 0; i < 5; i++) await app.inject('POST', '/api/auth/login', { pin: '1111' });
-    expect((await app.inject('POST', '/api/auth/login', { pin: '2468' })).status).toBe(429);
-  });
-});
-
 describe('general settings', () => {
   const originalTz = process.env.TZ;
   afterEach(() => {
@@ -55,6 +28,14 @@ describe('general settings', () => {
       syncIntervalSec: 90,
       publicUrl: null,
     });
+    await app.inject('POST', '/api/users', {
+      username: 'sam',
+      name: 'Sam',
+      password: 'sam-password',
+    });
+    const sam = app.client();
+    await sam.signIn('sam', 'sam-password');
+    expect((await sam.inject('PUT', '/api/system', { syncIntervalSec: 120 })).status).toBe(403);
   });
 
   it('saves time zone, sync interval and public address, and they survive a restart', async () => {
@@ -101,20 +82,6 @@ describe('general settings', () => {
     expect((await app.inject('PUT', '/api/system', { timeZone: 'Mars/Olympus' })).status).toBe(400);
     expect((await app.inject('PUT', '/api/system', { syncIntervalSec: 5 })).status).toBe(400);
     expect((await app.inject('PUT', '/api/system', { publicUrl: 'not a url' })).status).toBe(400);
-  });
-});
-
-describe('admin PIN', () => {
-  it('uses the environment PIN only until one is chosen, so GUI changes survive restarts', async () => {
-    app = await testApp({ adminPin: '2468' });
-    await app.login('2468');
-    expect((await app.inject('POST', '/api/auth/pin', { pin: '1357' })).status).toBe(200);
-
-    const dataDir = app.config.dataDir;
-    await app.app.close();
-    app = await testApp({ dataDir, adminPin: '2468' });
-    expect((await app.inject('POST', '/api/auth/login', { pin: '2468' })).status).toBe(401);
-    expect((await app.inject('POST', '/api/auth/login', { pin: '1357' })).status).toBe(200);
   });
 });
 

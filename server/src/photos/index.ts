@@ -229,7 +229,7 @@ export class Photos {
 
     app.get('/api/photos/albums', { preHandler: auth.guard }, async () => this.syno().albums());
 
-    app.post('/api/photos/synology', { preHandler: auth.guard }, async (req) => {
+    app.post('/api/photos/synology', { preHandler: auth.adminGuard }, async (req) => {
       const body = SynologyBody.parse(req.body);
       const client = new SynologyPhotos(body);
       const albums = await client.albums().catch((err) => {
@@ -242,7 +242,7 @@ export class Photos {
       return { ok: true, albums };
     });
 
-    app.delete('/api/photos/synology', { preHandler: auth.guard }, async () => {
+    app.delete('/api/photos/synology', { preHandler: auth.adminGuard }, async () => {
       this.db.prepare("DELETE FROM settings WHERE key = 'synologyPhotos'").run();
       this.synology = null;
       return { ok: true };

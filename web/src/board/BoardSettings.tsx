@@ -5,6 +5,7 @@ import {
   type Board,
   type TextSizeId,
   type ThemeId,
+  type UserDTO,
 } from '@hearthboard/shared';
 
 /** Keep widgets inside the grid after the grid size changes. */
@@ -24,11 +25,14 @@ export function BoardSettings({
   onChange,
   onClose,
   onDelete,
+  owner,
 }: {
   board: Board;
   onChange: (b: Board) => void;
   onClose: () => void;
   onDelete?: () => void;
+  /** Admins only: whose board this is. */
+  owner?: { id: string | null; people: UserDTO[]; onChange: (id: string) => void };
 }) {
   const set = (patch: Partial<Board>) => onChange(clampWidgets({ ...board, ...patch }));
   const preset = RESOLUTION_PRESETS.findIndex(
@@ -52,6 +56,19 @@ export function BoardSettings({
           onChange={(e) => set({ name: e.target.value || 'Board' })}
         />
       </label>
+      {owner && (
+        <label className="field">
+          <span>Belongs to</span>
+          <select value={owner.id ?? ''} onChange={(e) => owner.onChange(e.target.value)}>
+            {!owner.id && <option value="">Nobody</option>}
+            {owner.people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="field">
         <span>Screen</span>
         <select

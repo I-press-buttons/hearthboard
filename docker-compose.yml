@@ -1,6 +1,6 @@
 # Hearthboard on a Synology NAS (Container Manager → Project → Create → paste this).
-# Then open http://<nas-ip>:8080/edit from a phone or PC and choose a PIN.
-# Everything else (time zone, accounts, sync interval, PIN) is set in the web app under Settings.
+# Then open http://<nas-ip>:8080/edit from a phone or PC and create your sign-in.
+# Everything else (time zone, accounts, sync interval, people) is set in the web app under Settings.
 services:
   hearthboard:
     image: ghcr.io/i-press-buttons/hearthboard:latest
@@ -15,6 +15,9 @@ services:
       # (the first DSM user is usually 1026, group "users" is 100).
       PUID: '1026'
       PGID: '100'
+      # Optional: create an "admin" user with this password on first start, instead of
+      # on first visit.
+      # HEARTHBOARD_ADMIN_PASSWORD: "choose a long password"
       # Try it with sample data first:
       # HEARTHBOARD_DEMO: "1"
     volumes:

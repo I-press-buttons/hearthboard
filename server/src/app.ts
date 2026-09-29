@@ -19,6 +19,7 @@ import { Quotes } from './quotes';
 import { Reminders } from './reminders';
 import { SecretBox } from './secrets';
 import { applyTimeZone, SystemSettings } from './system';
+import { Users } from './users';
 import { HttpError } from './util';
 
 export interface AppContext {
@@ -26,6 +27,7 @@ export interface AppContext {
   db: DB;
   live: LiveHub;
   auth: Auth;
+  users: Users;
   boards: Boards;
   calendars: CalendarService;
   checklists: Checklists;
@@ -57,7 +59,10 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
       ? new SecretBox(config.secret ?? 'test-secret')
       : SecretBox.fromConfig(config.secret, config.dataDir);
   const live = new LiveHub();
-  const auth = new Auth(db, config.adminPin);
+  const users = new Users(db, secrets);
+  const auth = new Auth(db, users);
+  const authWarning = await auth.init(config);
+  if (authWarning) app.log.warn(authWarning);
   const system = new SystemSettings(db, config);
   applyTimeZone(system.get().timeZone);
 
@@ -104,6 +109,11 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
 
   live.register(app);
   auth.register(app);
+  users.register(app, auth, {
+    createStarterBoard: (userId, name) =>
+      boards.createStarter(userId, name, checklists.ensureDefault()),
+    transferBoards: (fromId, toId) => boards.transfer(fromId, toId),
+  });
   boards.register(app, auth);
   checklists.register(app, auth);
   reminders.register(app, auth);
@@ -143,5 +153,18 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   });
   app.addHook('onClose', async () => db.close());
 
-  return { app, db, live, auth, boards, calendars, checklists, reminders, photos, quotes, system };
+  return {
+    app,
+    db,
+    live,
+    auth,
+    users,
+    boards,
+    calendars,
+    checklists,
+    reminders,
+    photos,
+    quotes,
+    system,
+  };
 }

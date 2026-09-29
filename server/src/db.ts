@@ -1,11 +1,12 @@
 import Database from 'better-sqlite3';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
 export type DB = Database.Database;
 
 /** Append-only list of migrations; index + 1 is the schema version. */
-const MIGRATIONS: string[] = [
+export const MIGRATIONS: (string | ((db: DB) => void))[] = [
   `
   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   CREATE TABLE sessions (token TEXT PRIMARY KEY, created_at INTEGER NOT NULL, last_seen INTEGER NOT NULL);
@@ -84,6 +85,52 @@ const MIGRATIONS: string[] = [
     source TEXT NOT NULL DEFAULT ''
   );
   `,
+
+  // Individual sign-ins (replacing the shared admin PIN), two-step sign-in and board owners.
+  (db) => {
+    db.exec(`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member',
+        password TEXT NOT NULL,
+        totp_secret TEXT,
+        totp_pending TEXT,
+        totp_last_step INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE recovery_codes (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        hash TEXT NOT NULL,
+        PRIMARY KEY (user_id, hash)
+      );
+      DROP TABLE sessions;
+      CREATE TABLE sessions (
+        token_hash TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        stage TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        last_seen INTEGER NOT NULL
+      );
+      CREATE INDEX sessions_user ON sessions(user_id);
+      ALTER TABLE boards ADD COLUMN owner_id TEXT REFERENCES users(id) ON DELETE SET NULL;
+    `);
+    // An existing install becomes one admin user named "admin" whose password is the old PIN
+    // (same scrypt format), owning every board.
+    const pin = getSetting<unknown>(db, 'adminPin');
+    if (pin) {
+      const id = crypto.randomBytes(8).toString('hex');
+      db.prepare(
+        `INSERT INTO users (id, username, name, role, password, created_at)
+         VALUES (?, 'admin', 'Admin', 'admin', ?, ?)`,
+      ).run(id, JSON.stringify(pin), Date.now());
+      db.prepare('UPDATE boards SET owner_id = ?').run(id);
+      setSetting(db, 'legacyPinUser', id);
+      db.prepare("DELETE FROM settings WHERE key = 'adminPin'").run();
+    }
+  },
 ];
 
 export function openDb(file: string): DB {
@@ -99,7 +146,9 @@ function migrate(db: DB) {
   const current = db.pragma('user_version', { simple: true }) as number;
   for (let v = current; v < MIGRATIONS.length; v++) {
     db.transaction(() => {
-      db.exec(MIGRATIONS[v]);
+      const step = MIGRATIONS[v];
+      if (typeof step === 'string') db.exec(step);
+      else step(db);
       db.pragma(`user_version = ${v + 1}`);
     })();
   }

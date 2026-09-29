@@ -63,9 +63,11 @@ export class SystemSettings {
   }
 
   register(app: FastifyInstance, auth: Auth) {
-    const guard = { preHandler: auth.guard };
-    app.get('/api/system', guard, async () => this.get());
-    app.put('/api/system', guard, async (req) => this.update(SystemSettingsPatch.parse(req.body)));
+    app.get('/api/system', { preHandler: auth.guard }, async () => this.get());
+    // Household-wide, so admins only.
+    app.put('/api/system', { preHandler: auth.adminGuard }, async (req) =>
+      this.update(SystemSettingsPatch.parse(req.body)),
+    );
   }
 }
 
