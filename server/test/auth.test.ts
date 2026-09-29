@@ -102,6 +102,20 @@ describe('sign-in', () => {
     expect(res.status).toBe(429);
   });
 
+  it("doesn't forget wrong guesses at one account when you sign in to another", async () => {
+    app = await testApp();
+    await app.login();
+    await addUser(app, 'sam');
+    const sam = app.client();
+    for (let round = 0; round < 3; round++) {
+      for (let i = 0; i < 2; i++) await sam.signIn('admin', 'guess');
+      expect((await sam.signIn('sam', 'sam-password')).status).toBe(200);
+    }
+    expect((await sam.signIn('admin', ADMIN.password)).status).toBe(429);
+    // Sam's own sign-in isn't held up by the guesses at the admin's.
+    expect((await sam.signIn('sam', 'sam-password')).status).toBe(200);
+  });
+
   it('counts wrong passwords when turning off two-step sign-in or making recovery codes', async () => {
     app = await testApp();
     await app.login();
@@ -186,6 +200,19 @@ describe('two-step sign-in', () => {
     const d = app.client();
     await d.signIn('admin', ADMIN.password);
     expect((await d.inject('POST', '/api/auth/mfa', { code: recoveryCodes[0] })).status).toBe(401);
+  });
+
+  it("doesn't let signing in again with the password reset the count of wrong codes", async () => {
+    app = await testApp();
+    await app.login();
+    await enableMfa(app);
+    const thief = app.client();
+    for (let round = 0; round < 3; round++) {
+      expect((await thief.signIn('admin', ADMIN.password)).body).toEqual({ stage: 'mfa' });
+      for (let i = 0; i < 2; i++) await thief.inject('POST', '/api/auth/mfa', { code: '000000' });
+    }
+    await thief.signIn('admin', ADMIN.password);
+    expect((await thief.inject('POST', '/api/auth/mfa', { code: '000000' })).status).toBe(429);
   });
 
   it('makes you start over after too many wrong codes', async () => {

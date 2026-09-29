@@ -222,22 +222,35 @@ export class Auth {
 
   // ---------------- brute-force protection ----------------
 
-  private checkThrottle(req: FastifyRequest) {
-    const fail = this.failures.get(req.ip);
+  /**
+   * Wrong passwords count per address and account, so signing in to your own account doesn't
+   * wipe out guesses at someone else's. Wrong codes count per account: whoever is guessing
+   * them already has the password and can sign in again from anywhere.
+   */
+  private passwordKey(req: FastifyRequest, username: string) {
+    return `${req.ip}|${username.trim().toLowerCase()}`;
+  }
+
+  private codeKey(userId: string) {
+    return `code|${userId}`;
+  }
+
+  private checkThrottle(key: string) {
+    const fail = this.failures.get(key);
     if (fail && fail.until > Date.now())
       throw new HttpError(429, 'Too many attempts. Wait a bit and try again.');
   }
 
-  private recordFailure(req: FastifyRequest) {
+  private recordFailure(key: string) {
     const now = Date.now();
     if (this.failures.size > 1000) {
-      for (const [ip, f] of this.failures) {
-        if (now - f.last > FAILURE_MEMORY_MS && f.until < now) this.failures.delete(ip);
+      for (const [k, f] of this.failures) {
+        if (now - f.last > FAILURE_MEMORY_MS && f.until < now) this.failures.delete(k);
       }
     }
-    const prev = this.failures.get(req.ip);
+    const prev = this.failures.get(key);
     const count = (prev && now - prev.last < FAILURE_MEMORY_MS ? prev.count : 0) + 1;
-    this.failures.set(req.ip, {
+    this.failures.set(key, {
       count,
       until: count >= 5 ? now + 30_000 * (count - 4) : 0,
       last: now,
@@ -246,9 +259,10 @@ export class Auth {
 
   /** Check the signed-in user's password again before a sensitive change, with the lockout. */
   private async confirmPassword(req: FastifyRequest, password: string, error: string) {
-    this.checkThrottle(req);
+    const key = this.passwordKey(req, req.user!.username);
+    this.checkThrottle(key);
     if (!(await this.users.checkPassword(req.user!, password))) {
-      this.recordFailure(req);
+      this.recordFailure(key);
       throw new HttpError(400, error);
     }
   }
@@ -282,14 +296,15 @@ export class Auth {
     });
 
     app.post('/api/auth/login', async (req, reply) => {
-      this.checkThrottle(req);
       const { username, password } = LoginInput.parse(req.body);
+      const key = this.passwordKey(req, username);
+      this.checkThrottle(key);
       const user = this.users.byUsername(username);
       if (!(await this.users.checkPassword(user, password))) {
-        this.recordFailure(req);
+        this.recordFailure(key);
         return reply.code(401).send({ error: 'Wrong username or password.' });
       }
-      this.failures.delete(req.ip);
+      this.failures.delete(key);
       this.endSession(req);
       const stage: Stage = user!.totp_secret ? 'mfa' : this.requireMfa() ? 'enroll' : 'full';
       this.startSession(reply, user!.id, stage);
@@ -298,14 +313,15 @@ export class Auth {
 
     // Second step: a code from the authenticator app, or a recovery code.
     app.post('/api/auth/mfa', async (req, reply) => {
-      this.checkThrottle(req);
       const cur = this.session(req);
       if (cur?.s.stage !== 'mfa')
         return reply.code(401).send({ error: 'That sign-in expired. Start again.' });
+      const key = this.codeKey(cur.user.id);
+      this.checkThrottle(key);
       const { code } = CodeInput.parse(req.body);
       const used = this.users.verifySecondFactor(cur.user.id, code);
       if (!used) {
-        this.recordFailure(req);
+        this.recordFailure(key);
         const attempts = cur.s.attempts + 1;
         if (attempts >= MAX_CODE_ATTEMPTS) {
           this.endSession(req);
@@ -316,7 +332,7 @@ export class Auth {
           .run(attempts, cur.s.token_hash);
         return reply.code(401).send({ error: 'That code is not right.' });
       }
-      this.failures.delete(req.ip);
+      this.failures.delete(key);
       this.endSession(req);
       this.startSession(reply, cur.user.id, 'full');
       return {
