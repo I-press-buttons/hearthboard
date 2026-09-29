@@ -13,6 +13,7 @@ import { Checklists } from './checklists';
 import type { Config } from './config';
 import { openDb, type DB } from './db';
 import { ensureDemoPhotos, seedDemo } from './demo';
+import { hostAllowed, hostRefusal, publicHost } from './hosts';
 import { LiveHub } from './live';
 import { Meals } from './meals';
 import { Notes } from './notes';
@@ -73,6 +74,19 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   if (authWarning) app.log.warn(authWarning);
   const system = new SystemSettings(db, config);
   applyTimeZone(system.get().timeZone);
+
+  // A web page can point its own domain at this server and read the board as you (DNS
+  // rebinding), so only answer to names that are really ours. The raw Host header is what the
+  // browser used; X-Forwarded-Host is something a page could set itself.
+  if (!config.allowedHosts.includes('*')) {
+    app.addHook('onRequest', async (req, reply) => {
+      const host = req.headers.host;
+      if (!host) return;
+      // The public address is read on every check, so changing it in Settings applies at once.
+      if (hostAllowed(host, config.allowedHosts, () => publicHost(system.get().publicUrl))) return;
+      return reply.code(421).type('text/plain; charset=utf-8').send(hostRefusal(host));
+    });
+  }
 
   let photosDir = config.photosDir;
   if (config.demo && !fs.existsSync(photosDir)) {

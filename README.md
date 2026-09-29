@@ -177,6 +177,7 @@ Docker only needs what the container itself requires:
 | `HEARTHBOARD_DATA`           | `/data`         | Database, encryption key and image cache.                                                                                                            |
 | `HEARTHBOARD_PHOTOS`         | `/photos`       | Photo folder (mount it read-only).                                                                                                                   |
 | `HEARTHBOARD_SECRET`         | (generated)     | Key for encrypting stored credentials. By default one is generated in `/data/secret.key`.                                                            |
+| `HEARTHBOARD_ALLOWED_HOSTS`  | (none)          | Extra names the server answers to, comma-separated (see below). `*.example.com` includes subdomains; `*` turns the check off.                        |
 | `HEARTHBOARD_DEMO`           | (off)           | `1` loads sample calendars, reminders and photos.                                                                                                    |
 | `HEARTHBOARD_ADMIN_PASSWORD` | (none)          | Optional. On first start, create an `admin` user with this password instead of setting one up on first visit. Ignored once anyone has signed up.     |
 | `HEARTHBOARD_RESET_ADMIN`    | (off)           | Recovery only: `1` resets the `admin` user to `HEARTHBOARD_ADMIN_PASSWORD` with two-step sign-in off, on every start. Remove it once you're back in. |
@@ -185,6 +186,15 @@ Older compose files that still set `TZ`, `HEARTHBOARD_SYNC_INTERVAL` or
 `HEARTHBOARD_PUBLIC_URL` keep working: those values are used only until you
 change the setting in the web app, and can be removed. `HEARTHBOARD_PIN` works
 like `HEARTHBOARD_ADMIN_PASSWORD`.
+
+Hearthboard only answers to the addresses a home network normally uses: IP
+addresses, `localhost`, one-word names like `diskstation`, names ending in
+`.local`, `.lan`, `.home.arpa`, `.internal` or `.localdomain`, and the public
+HTTPS address saved under **Settings → General**. That stops a web page someone
+visits from reading your board through your NAS (a trick called DNS
+rebinding). If you reach the board by another name, add it to
+`HEARTHBOARD_ALLOWED_HOSTS`. A browser that uses an unknown name is told which
+one, and you can always open the board by IP address instead.
 
 ## Themes and text sizes
 
