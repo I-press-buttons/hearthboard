@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const PROVIDERS = ['caldav', 'google', 'demo'] as const;
+export const PROVIDERS = ['caldav', 'google', 'ics', 'demo'] as const;
 export type ProviderKind = (typeof PROVIDERS)[number];
 
 export interface AccountDTO {

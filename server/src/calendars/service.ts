@@ -14,6 +14,7 @@ import type { SecretBox } from '../secrets';
 import { errorMessage, HttpError, shortHash } from '../util';
 import { CalDavProvider, type CalDavSecret } from './caldav';
 import { DemoProvider } from './demo';
+import { IcsFeedProvider, type FeedSecret } from './feed';
 import { GoogleProvider, googleOccurrence, type GoogleSecret } from './google';
 import { expandIcs, type Occurrence } from './ics';
 import {
@@ -78,6 +79,8 @@ export const defaultProviderFactory: ProviderFactory = (provider, secret) => {
       return new CalDavProvider(secret as CalDavSecret);
     case 'google':
       return new GoogleProvider(secret as GoogleSecret);
+    case 'ics':
+      return new IcsFeedProvider(secret as FeedSecret);
     case 'demo':
       return DemoProvider.seeded();
   }
@@ -136,14 +139,19 @@ export class CalendarService {
     }));
   }
 
-  async addAccount(provider: ProviderKind, name: string, secret: unknown): Promise<AccountDTO> {
+  /** Connect an account. Without a name, it's named after its first calendar. */
+  async addAccount(
+    provider: ProviderKind,
+    name: string | null,
+    secret: unknown,
+  ): Promise<AccountDTO> {
     const id = crypto.randomBytes(6).toString('hex');
     const p = this.factory(provider, secret);
     // Fail fast on bad credentials before storing anything.
     const remote = await p.listCalendars();
     this.db
       .prepare('INSERT INTO accounts (id, provider, name, secret) VALUES (?, ?, ?, ?)')
-      .run(id, provider, name, this.secrets.seal(secret));
+      .run(id, provider, name || remote[0]?.name || provider, this.secrets.seal(secret));
     this.providers.set(id, p);
     this.storeCalendarList(id, remote);
     this.listRefreshed.set(id, Date.now());
@@ -265,16 +273,19 @@ export class CalendarService {
     await Promise.all(ids.map((id) => this.syncAccount(id)));
   }
 
-  /** Sync one account; concurrent calls share the in-flight run. */
-  syncAccount(accountId: string): Promise<void> {
+  /**
+   * Sync one account; concurrent calls share the in-flight run. `force` (Sync now) skips
+   * provider-side throttling, e.g. calendar feeds that are only downloaded every 15 minutes.
+   */
+  syncAccount(accountId: string, force = false): Promise<void> {
     const inflight = this.running.get(accountId);
     if (inflight) return inflight;
-    const run = this.doSyncAccount(accountId).finally(() => this.running.delete(accountId));
+    const run = this.doSyncAccount(accountId, force).finally(() => this.running.delete(accountId));
     this.running.set(accountId, run);
     return run;
   }
 
-  private async doSyncAccount(accountId: string) {
+  private async doSyncAccount(accountId: string, force: boolean) {
     let changed = false;
     try {
       const p = this.provider(accountId);
@@ -285,7 +296,7 @@ export class CalendarService {
       const cals = this.db
         .prepare('SELECT * FROM calendars WHERE account_id = ? AND enabled = 1')
         .all(accountId) as CalendarRow[];
-      for (const cal of cals) changed = (await this.syncCalendar(cal)) || changed;
+      for (const cal of cals) changed = (await this.syncCalendar(cal, force)) || changed;
       this.setStatus(accountId, 'ok', null);
     } catch (err) {
       if (err instanceof AuthError) this.providers.delete(accountId);
@@ -306,9 +317,12 @@ export class CalendarService {
   }
 
   /** Pull remote changes for one calendar into the cache. Returns true if anything changed. */
-  async syncCalendar(cal: CalendarRow): Promise<boolean> {
+  async syncCalendar(cal: CalendarRow, force = false): Promise<boolean> {
     const p = this.provider(cal.account_id);
-    const result = await p.sync({ remoteId: cal.remote_id, cursor: cal.cursor }, syncWindow());
+    const result = await p.sync(
+      { remoteId: cal.remote_id, cursor: cal.cursor, force },
+      syncWindow(),
+    );
     if (result.unchanged) return false;
     const tx = this.db.transaction(() => {
       if (result.full) {

@@ -3,7 +3,10 @@ import path from 'node:path';
 import sharp from 'sharp';
 import type { CalendarService } from './calendars/service';
 import type { Checklists } from './checklists';
+import type { Meals } from './meals';
+import type { Notes } from './notes';
 import type { Reminders } from './reminders';
+import { localDate } from './util';
 
 const SCENES: [string, string, string][] = [
   ['Lake sunrise', '#f97316', '#1e3a8a'],
@@ -45,6 +48,8 @@ export async function seedDemo(opts: {
   calendars: CalendarService;
   reminders: Reminders;
   checklists: Checklists;
+  meals: Meals;
+  notes: Notes;
 }) {
   if (!opts.calendars.listAccounts().some((a) => a.provider === 'demo')) {
     await opts.calendars.addAccount('demo', 'Demo family', null);
@@ -64,5 +69,31 @@ export async function seedDemo(opts: {
   }
   if (opts.checklists.all().length < 2) {
     opts.checklists.create('Groceries', false, ['Apples', 'Oat milk', 'Coffee beans', 'Tortillas']);
+  }
+  const today = new Date();
+  if (!opts.meals.range(localDate(today), 7).length) {
+    const dinners = [
+      'Tacos',
+      'Spaghetti & meatballs',
+      'Leftovers',
+      'Chicken stir-fry',
+      'Pizza night 🍕',
+      'Grill out',
+      'Soup & grilled cheese',
+    ];
+    dinners.forEach((text, i) => {
+      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+      opts.meals.set(localDate(d), 'dinner', text);
+    });
+  }
+  if (!opts.notes.list().length) {
+    opts.notes.create(
+      { id: null, name: 'Mom' },
+      { text: 'Dentist moved to 3:30 on Thursday', color: 'pink', expiresInHours: 72 },
+    );
+    opts.notes.create(
+      { id: null, name: 'Dad' },
+      { text: 'Who ate the last cookie? 🍪', color: 'yellow', expiresInHours: 24 },
+    );
   }
 }

@@ -91,8 +91,15 @@ browser full-screen, and stop the screen from sleeping:
   the start URL set to the board and "Keep screen on" enabled.
 - **Raspberry Pi + monitor:** `chromium --kiosk --noerrdialogs --incognito http://<nas-ip>:8080/`
 - **iPad / tablet:** open the page in Safari, _Share → Add to Home Screen_, then
-  set Auto-Lock to Never and use Guided Access.
+  set Auto-Lock to Never and use Guided Access. Turn on **Touch screen** in the
+  board settings so the family can tick off chores and reminders on it without
+  signing in ([details](features.md#8-touch-screen-mode-for-a-wall-tablet)).
 - **Smart TV browsers** work too, but they often dim or close idle pages.
+
+Tap the screen or move the mouse and a **⛶ Full screen** button appears for a
+few seconds, in browsers that allow it. To show different boards at different
+times of day on the same screen, see
+[board schedules](features.md#9-board-schedules).
 
 Turn on **Dim the screen at night** in the board settings to darken the
 display between two times. The display also nudges itself a pixel or two

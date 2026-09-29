@@ -5,7 +5,7 @@ export function TopBar({
   active,
 }: {
   children?: ReactNode;
-  active: 'edit' | 'calendar' | 'settings';
+  active: 'edit' | 'calendar' | 'family' | 'settings';
 }) {
   const link = (href: string, label: string, key: typeof active) => (
     <a className={`btn ${active === key ? '' : 'ghost'}`} href={href}>
@@ -20,6 +20,7 @@ export function TopBar({
       </a>
       {link('/edit', 'Layout', 'edit')}
       {link('/calendar', 'Calendar', 'calendar')}
+      {link('/family', 'Family', 'family')}
       {link('/settings', 'Settings', 'settings')}
       {children}
     </div>

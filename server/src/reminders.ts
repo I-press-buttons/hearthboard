@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { IngestPayload, IngestReminder, normalizeDue, type ReminderDTO } from '@hearthboard/shared';
 import type { Auth } from './auth';
+import type { TouchGate } from './boards';
 import { getSetting, setSetting, type DB } from './db';
 import type { LiveHub } from './live';
 import { shortHash } from './util';
@@ -146,7 +147,7 @@ export class Reminders {
     return true;
   }
 
-  register(app: FastifyInstance, auth: Auth) {
+  register(app: FastifyInstance, auth: Auth, touch: TouchGate = () => false) {
     app.post<{ Querystring: { token?: string } }>('/api/reminders/ingest', async (req, reply) => {
       const header =
         req.headers.authorization ?? (req.query.token ? `Bearer ${req.query.token}` : undefined);
@@ -163,7 +164,22 @@ export class Reminders {
 
     app.post<{ Params: { id: string }; Body: { done?: boolean } }>(
       '/api/reminders/:id/complete',
-      { preHandler: auth.guard },
+      {
+        // A touch-screen board may tick reminders from the lists it shows.
+        preHandler: auth.guardOr((req) => {
+          const { id } = req.params as { id: string };
+          const r = this.db.prepare('SELECT list FROM reminders WHERE id = ?').get(id) as
+            { list: string } | undefined;
+          return (
+            !!r &&
+            touch(req, (w) => {
+              if (w.type !== 'reminders') return false;
+              const lists = (w.config as { lists?: string[] }).lists ?? [];
+              return !lists.length || lists.includes(r.list);
+            })
+          );
+        }),
+      },
       async (req, reply) => {
         const ok = this.requestComplete(req.params.id, req.body?.done !== false);
         return ok ? { ok } : reply.code(404).send({ error: 'No such reminder' });

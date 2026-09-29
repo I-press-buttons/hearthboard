@@ -23,6 +23,10 @@ export type FieldSpec =
       suffix?: string;
     }
   | { key: string; label: string; type: 'select'; options: [string, string][] }
+  /** Several of a fixed set, shown as chips. */
+  | { key: string; label: string; type: 'multi'; options: [string, string][] }
+  /** `place` sets place, latitude and longitude together; `countdowns` edits a list of dates. */
+  | { key: string; label: string; type: 'place' | 'countdowns' }
   | {
       key: string;
       label: string;

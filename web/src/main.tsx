@@ -5,6 +5,7 @@ import { RequireAuth } from './components/Auth';
 import { CalendarPage } from './pages/CalendarPage';
 import { Display } from './pages/Display';
 import { Editor } from './pages/Editor';
+import { Family } from './pages/Family';
 import { Settings } from './pages/Settings';
 
 function App() {
@@ -20,6 +21,12 @@ function App() {
       return (
         <RequireAuth>
           <CalendarPage />
+        </RequireAuth>
+      );
+    case '/family':
+      return (
+        <RequireAuth>
+          <Family />
         </RequireAuth>
       );
     case '/settings':

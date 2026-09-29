@@ -28,6 +28,8 @@ export interface SyncResult {
 export interface CalendarRef {
   remoteId: string;
   cursor: string | null;
+  /** Someone pressed "Sync now": skip any provider-side throttling. */
+  force?: boolean;
 }
 
 export interface SyncWindow {

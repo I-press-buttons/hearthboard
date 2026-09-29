@@ -9,6 +9,7 @@ import {
 import type { DB } from './db';
 import type { LiveHub } from './live';
 import type { Auth } from './auth';
+import type { TouchGate } from './boards';
 import { localDate } from './util';
 
 interface ListRow {
@@ -116,8 +117,25 @@ export class Checklists {
     return () => clearInterval(t);
   }
 
-  register(app: FastifyInstance, auth: Auth) {
+  register(app: FastifyInstance, auth: Auth, touch: TouchGate = () => false) {
     const guard = { preHandler: auth.guard };
+    // A touch-screen board may tick (and only tick) items of a checklist it shows.
+    const tickable = {
+      preHandler: auth.guardOr((req) => {
+        const body = req.body as Record<string, unknown> | null;
+        const onlyDone =
+          !!body && typeof body.done === 'boolean' && Object.keys(body).every((k) => k === 'done');
+        const { id } = req.params as { id: string };
+        return (
+          onlyDone &&
+          touch(
+            req,
+            (w) =>
+              w.type === 'checklist' && (w.config as { checklistId?: string }).checklistId === id,
+          )
+        );
+      }),
+    };
 
     app.get('/api/checklists', async () => this.all());
 
@@ -156,7 +174,7 @@ export class Checklists {
 
     app.patch<{ Params: { id: string; itemId: string } }>(
       '/api/checklists/:id/items/:itemId',
-      guard,
+      tickable,
       async (req) => {
         const patch = ChecklistItemPatch.parse(req.body);
         const sets: string[] = [];

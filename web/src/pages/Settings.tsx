@@ -358,6 +358,81 @@ function GoogleDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Public holiday calendars Google publishes as .ics feeds. */
+const FEED_PRESETS: [string, string][] = [
+  ['US holidays', 'en.usa'],
+  ['UK holidays', 'en.uk'],
+  ['Canadian holidays', 'en.canadian'],
+  ['Australian holidays', 'en.australian'],
+  ['Christian holidays', 'en.christian'],
+];
+const presetUrl = (id: string) =>
+  `https://calendar.google.com/calendar/ical/${encodeURIComponent(`${id}#holiday@group.v.calendar.google.com`)}/public/basic.ics`;
+
+function FeedDialog({ onClose }: { onClose: () => void }) {
+  const [form, setForm] = useState({ url: '', name: '' });
+  const { busy, error, run } = useAction();
+  return (
+    <Modal title="Subscribe to a calendar" onClose={onClose}>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (await run(() => api.post('/api/accounts/ics', form))) onClose();
+        }}
+      >
+        <p className="hint">
+          Any calendar with an <b>.ics</b> or <b>webcal://</b> address: school and sports schedules,
+          holidays, a Google calendar's “secret address in iCal format”, or a public iCloud
+          calendar. These are read-only on the board and are checked every 15 minutes.
+        </p>
+        <div className="field">
+          <span>Quick picks</span>
+          <div className="chips">
+            {FEED_PRESETS.map(([label, id]) => (
+              <span
+                key={id}
+                className={`chip ${form.url === presetUrl(id) ? 'on' : ''}`}
+                onClick={() => setForm({ url: presetUrl(id), name: label })}
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+        <label className="field">
+          <span>Calendar address</span>
+          <input
+            type="text"
+            inputMode="url"
+            required
+            placeholder="webcal://… or https://….ics"
+            value={form.url}
+            onChange={(e) => setForm({ ...form, url: e.target.value })}
+          />
+        </label>
+        <label className="field">
+          <span>Name on the board (optional)</span>
+          <input
+            type="text"
+            placeholder="Uses the calendar's own name"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+          />
+        </label>
+        {error && <div className="error-text">{error}</div>}
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="btn primary" disabled={busy}>
+            {busy ? 'Checking…' : 'Subscribe'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function CalendarsCard() {
   const { data: accounts, reload: reloadAccounts } = useLiveQuery(
     ['calendars'],
@@ -370,7 +445,7 @@ function CalendarsCard() {
     () => api.get<CalendarDTO[]>('/api/calendars'),
     [],
   );
-  const [dialog, setDialog] = useState<null | 'icloud' | 'custom' | 'google'>(null);
+  const [dialog, setDialog] = useState<null | 'icloud' | 'custom' | 'google' | 'feed'>(null);
   const { error, run } = useAction();
   const googleResult = new URLSearchParams(location.search).get('google');
 
@@ -396,7 +471,9 @@ function CalendarsCard() {
                   ? 'iCloud / CalDAV'
                   : a.provider === 'google'
                     ? 'Google'
-                    : 'Demo'}
+                    : a.provider === 'ics'
+                      ? 'Subscribed'
+                      : 'Demo'}
                 )
               </span>
             </b>
@@ -458,7 +535,18 @@ function CalendarsCard() {
         <button className="btn" onClick={() => setDialog('custom')}>
           Add other CalDAV
         </button>
+        <button className="btn" onClick={() => setDialog('feed')}>
+          Subscribe to a calendar (holidays, school…)
+        </button>
       </div>
+      {dialog === 'feed' && (
+        <FeedDialog
+          onClose={() => {
+            setDialog(null);
+            reloadAccounts();
+          }}
+        />
+      )}
       {(dialog === 'icloud' || dialog === 'custom') && (
         <CalDavDialog
           preset={dialog}

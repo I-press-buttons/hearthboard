@@ -4,11 +4,14 @@ import {
   TEXT_SIZES,
   type CalendarDTO,
   type ChecklistDTO,
+  type CountdownEntry,
+  type PlaceDTO,
   type TextSizeId,
   type WidgetInstance,
   type WidgetType,
 } from '@hearthboard/shared';
-import { api } from '../api';
+import { api, qs } from '../api';
+import { useAction } from '../components/Card';
 import { WIDGETS } from '../widgets/registry';
 import type { FieldSpec, WidgetDef } from '../widgets/types';
 
@@ -49,6 +52,185 @@ function MultiChips({
           </span>
         );
       })}
+    </div>
+  );
+}
+
+/** Search Open-Meteo's place names, or use this device's location. Sets place + coordinates. */
+function PlaceField({ config, onChange }: { config: Config; onChange: (v: Config) => void }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<PlaceDTO[] | null>(null);
+  const { busy, error, run, setError } = useAction();
+  const lat = config.latitude as number | null;
+  const lon = config.longitude as number | null;
+  const search = () =>
+    run(async () => setResults(await api.get<PlaceDTO[]>(`/api/weather/places${qs({ q })}`)));
+  const round = (n: number) => Math.round(n * 1000) / 1000;
+  return (
+    <div>
+      <div className="hint" style={{ margin: '0 0 8px' }}>
+        {lat !== null && lon !== null ? (
+          <>
+            <b style={{ color: 'var(--text)' }}>{String(config.place || 'Chosen place')}</b> (
+            {lat.toFixed(2)}, {lon.toFixed(2)})
+          </>
+        ) : (
+          'No place yet.'
+        )}
+      </div>
+      <form
+        className="row"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (q.trim().length >= 2) void search();
+        }}
+      >
+        <input
+          className="grow"
+          type="text"
+          placeholder="Town or city"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <button className="btn small" disabled={busy}>
+          {busy ? 'Searching…' : 'Search'}
+        </button>
+      </form>
+      {results && (
+        <div className="place-results">
+          {results.length ? (
+            results.map((r) => (
+              <button
+                key={`${r.latitude},${r.longitude}`}
+                type="button"
+                onClick={() => {
+                  const region = r.region.split(',')[0];
+                  onChange({
+                    ...config,
+                    place: region && region !== r.name ? `${r.name}, ${region}` : r.name,
+                    latitude: round(r.latitude),
+                    longitude: round(r.longitude),
+                  });
+                  setResults(null);
+                  setQ('');
+                }}
+              >
+                {r.name} <span className="hint">{r.region}</span>
+              </button>
+            ))
+          ) : (
+            <div className="hint">No places found. Try the nearest town.</div>
+          )}
+        </div>
+      )}
+      {window.isSecureContext && 'geolocation' in navigator && (
+        <button
+          type="button"
+          className="btn small ghost"
+          style={{ marginTop: 6 }}
+          onClick={() =>
+            navigator.geolocation.getCurrentPosition(
+              (pos) =>
+                onChange({
+                  ...config,
+                  place: 'Home',
+                  latitude: round(pos.coords.latitude),
+                  longitude: round(pos.coords.longitude),
+                }),
+              (err) => setError(`Couldn't get this device's location: ${err.message}`),
+            )
+          }
+        >
+          📍 Use this device's location
+        </button>
+      )}
+      {error && <div className="error-text">{error}</div>}
+    </div>
+  );
+}
+
+/** The dates a countdown widget counts down to. */
+function CountdownsField({
+  value,
+  onChange,
+}: {
+  value: CountdownEntry[];
+  onChange: (v: CountdownEntry[]) => void;
+}) {
+  const set = (i: number, patch: Partial<CountdownEntry>) =>
+    onChange(value.map((e, j) => (j === i ? { ...e, ...patch } : e)));
+  const nextWeek = new Date(Date.now() + 7 * 86_400_000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    <div>
+      {value.map((e, i) => (
+        <div key={i} className="countdown-edit">
+          <div className="row" style={{ flexWrap: 'nowrap' }}>
+            <input
+              type="text"
+              className="emoji-input"
+              aria-label="Emoji"
+              placeholder="🎉"
+              maxLength={16}
+              value={e.emoji}
+              onChange={(ev) => set(i, { emoji: ev.target.value })}
+            />
+            <input
+              type="text"
+              aria-label="What"
+              placeholder="What (e.g. Beach trip)"
+              maxLength={100}
+              value={e.title}
+              onChange={(ev) => set(i, { title: ev.target.value })}
+            />
+            <button
+              type="button"
+              className="btn small ghost"
+              aria-label="Remove date"
+              onClick={() => onChange(value.filter((_, j) => j !== i))}
+            >
+              ✕
+            </button>
+          </div>
+          <div className="row">
+            <input
+              type="date"
+              aria-label="Date"
+              style={{ width: 'auto' }}
+              value={e.date}
+              onChange={(ev) => ev.target.value && set(i, { date: ev.target.value })}
+            />
+            <label className="row" style={{ gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={e.yearly}
+                onChange={(ev) => set(i, { yearly: ev.target.checked })}
+              />
+              Every year
+            </label>
+          </div>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="btn small"
+        onClick={() =>
+          onChange([
+            ...value,
+            {
+              title: '',
+              emoji: '',
+              yearly: false,
+              date: `${nextWeek.getFullYear()}-${pad(nextWeek.getMonth() + 1)}-${pad(nextWeek.getDate())}`,
+            },
+          ])
+        }
+      >
+        + Add a date
+      </button>
+      <p className="hint" style={{ marginBottom: 0 }}>
+        “Every year” is for birthdays and holidays: it counts to the next one.
+      </p>
     </div>
   );
 }
@@ -197,6 +379,33 @@ function Field({
           </select>
         </label>
       );
+    case 'multi':
+      return (
+        <div className="field">
+          <span>{field.label}</span>
+          <MultiChips
+            options={field.options.map(([id, label]) => ({ id, label }))}
+            value={(value as string[]) ?? []}
+            onChange={(v) =>
+              v.length && onChange(field.options.map(([id]) => id).filter((id) => v.includes(id)))
+            }
+          />
+        </div>
+      );
+    case 'place':
+      return (
+        <div className="field">
+          <span>{field.label}</span>
+          <PlaceField config={value as Config} onChange={onChange} />
+        </div>
+      );
+    case 'countdowns':
+      return (
+        <div className="field">
+          <span>{field.label}</span>
+          <CountdownsField value={(value as CountdownEntry[]) ?? []} onChange={onChange} />
+        </div>
+      );
     default:
       return (
         <div className="field">
@@ -235,14 +444,19 @@ export function WidgetSettings({
           ✕
         </button>
       </h2>
-      {visible.map((f) => (
-        <Field
-          key={f.key}
-          field={f}
-          value={config[f.key]}
-          onChange={(v) => onChange({ ...config, [f.key]: v })}
-        />
-      ))}
+      {visible.map((f) =>
+        f.type === 'place' ? (
+          // The place picker reads and writes several keys at once.
+          <Field key={f.key} field={f} value={config} onChange={(v) => onChange(v as Config)} />
+        ) : (
+          <Field
+            key={f.key}
+            field={f}
+            value={config[f.key]}
+            onChange={(v) => onChange({ ...config, [f.key]: v })}
+          />
+        ),
+      )}
       <label className="field">
         <span>Text size</span>
         <select

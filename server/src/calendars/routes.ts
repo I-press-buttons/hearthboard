@@ -6,6 +6,7 @@ import type { Auth } from '../auth';
 import type { SystemSettings } from '../system';
 import { HttpError } from '../util';
 import { ICLOUD_CALDAV_URL } from './caldav';
+import { normalizeFeedUrl } from './feed';
 import {
   exchangeGoogleCode,
   extractAuthCode,
@@ -20,6 +21,12 @@ const CalDavBody = z.object({
   serverUrl: z.string().url().optional(),
   username: z.string().min(1),
   password: z.string().min(1),
+});
+
+const FeedBody = z.object({
+  url: z.string().trim().min(8).max(2000),
+  /** Leave empty to use the feed's own name. */
+  name: z.string().trim().max(100).optional(),
 });
 
 const GoogleStart = z.object({
@@ -96,6 +103,22 @@ export function registerCalendarRoutes(
     });
   });
 
+  // Subscribe to a read-only .ics / webcal:// feed: holidays, school, sports.
+  app.post('/api/accounts/ics', admin, async (req) => {
+    const body = FeedBody.parse(req.body);
+    let url: string;
+    try {
+      url = normalizeFeedUrl(body.url);
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+    try {
+      return await svc.addAccount('ics', body.name || null, { url });
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+  });
+
   app.post('/api/accounts/google/start', admin, async (req) => {
     const body = GoogleStart.parse(req.body);
     const { publicUrl } = system.get();
@@ -135,7 +158,7 @@ export function registerCalendarRoutes(
   });
 
   app.post<{ Params: { id: string } }>('/api/accounts/:id/sync', admin, async (req) => {
-    await svc.syncAccount(req.params.id);
+    await svc.syncAccount(req.params.id, true);
     return svc.listAccounts().find((a) => a.id === req.params.id) ?? null;
   });
 

@@ -162,6 +162,17 @@ export class Auth {
     if (!req.user) return reply.code(401).send({ error: 'Sign in first.' });
   };
 
+  /**
+   * preHandler: signed in, or `allow(req)` says the request may go ahead without signing in
+   * (a tick from a touch-screen board).
+   */
+  guardOr(allow: (req: FastifyRequest) => boolean) {
+    return async (req: FastifyRequest, reply: FastifyReply) => {
+      req.user = this.currentUser(req);
+      if (!req.user && !allow(req)) return reply.code(401).send({ error: 'Sign in first.' });
+    };
+  }
+
   /** preHandler for household settings: accounts, people, tokens. */
   adminGuard = async (req: FastifyRequest, reply: FastifyReply) => {
     req.user = this.currentUser(req);

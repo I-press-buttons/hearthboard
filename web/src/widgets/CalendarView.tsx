@@ -44,6 +44,8 @@ interface Props {
   editable?: boolean;
   showWeekends?: boolean;
   toolbar?: ToolbarInput | false;
+  /** Jump to this date whenever it changes (e.g. after adding an event). */
+  focusDate?: Date | null;
   onSelect?: (arg: DateSelectArg) => void;
   onEventClick?: (dto: EventDTO) => void;
   onEventChange?: (arg: EventChangeArg, dto: EventDTO) => void;
@@ -56,6 +58,7 @@ export function CalendarView({
   editable,
   showWeekends = true,
   toolbar,
+  focusDate,
   onSelect,
   onEventClick,
   onEventChange,
@@ -73,6 +76,10 @@ export function CalendarView({
   useEffect(() => {
     ref.current?.getApi().changeView(view);
   }, [view]);
+
+  useEffect(() => {
+    if (focusDate) ref.current?.getApi().gotoDate(focusDate);
+  }, [focusDate]);
 
   // FullCalendar only watches window resizes; widgets resize (and animate) on their own.
   useEffect(() => {

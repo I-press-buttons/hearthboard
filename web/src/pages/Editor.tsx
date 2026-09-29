@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  nudgeWidget,
+  overlaps,
   WIDGET_DEFAULT_SIZE,
   WIDGET_TYPES,
   type Board,
@@ -13,14 +15,55 @@ import { BoardCanvas } from '../board/BoardCanvas';
 import { BoardSettings } from '../board/BoardSettings';
 import { WidgetSettings } from '../board/WidgetSettings';
 import { useMe } from '../components/Auth';
-import { TopBar } from '../components/TopBar';
+import { Modal, TopBar } from '../components/TopBar';
 import { useLive } from '../live';
 import { WIDGETS, WidgetView } from '../widgets/registry';
 
 const newId = () => Math.random().toString(16).slice(2, 14);
 
-function overlaps(a: { x: number; y: number; w: number; h: number }, b: typeof a) {
-  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+/** Steps of undo kept per board. */
+const HISTORY_LIMIT = 60;
+/** Changes with the same merge key this close together are one undo step (typing, nudging). */
+const MERGE_MS = 1500;
+
+const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+const MOD = isMac ? '⌘' : 'Ctrl';
+
+const SHORTCUTS: [string, string][] = [
+  [`${MOD} Z`, 'Undo'],
+  [`${MOD} Shift Z  or  ${MOD} Y`, 'Redo'],
+  ['Arrow keys', 'Move the selected widget one square'],
+  ['Shift + arrow keys', 'Make the selected widget bigger or smaller'],
+  [`${MOD} D`, 'Duplicate the selected widget'],
+  ['Delete or Backspace', 'Remove the selected widget'],
+  ['Tab / Shift Tab', 'Select the next / previous widget'],
+  ['Esc', 'Deselect and close panels'],
+  ['?', 'Show these shortcuts'],
+];
+
+function ShortcutHelp({ onClose }: { onClose: () => void }) {
+  return (
+    <Modal title="Keyboard shortcuts" onClose={onClose}>
+      <table className="shortcuts">
+        <tbody>
+          {SHORTCUTS.map(([keys, what]) => (
+            <tr key={keys}>
+              <td>
+                <kbd>{keys}</kbd>
+              </td>
+              <td>{what}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="hint">On a phone, use the ↶ and ↷ buttons at the top to undo and redo.</p>
+      <div className="modal-actions">
+        <button className="btn primary" onClick={onClose}>
+          Got it
+        </button>
+      </div>
+    </Modal>
+  );
 }
 
 /** First free spot for a widget, shrinking it towards its minimum size if needed. */
@@ -66,6 +109,10 @@ export function Editor() {
   const [menu, setMenu] = useState(false);
   const [save, setSave] = useState<SaveState>('saved');
   const [error, setError] = useState<string | null>(null);
+  const [hist, setHist] = useState<{ past: Board[]; future: Board[] }>({ past: [], future: [] });
+  const lastMerge = useRef<{ key: string; at: number } | null>(null);
+  const [toast, setToast] = useState<{ text: string; undo: boolean } | null>(null);
+  const [help, setHelp] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const saveState = useRef<SaveState>('saved');
   saveState.current = save;
@@ -87,6 +134,8 @@ export function Editor() {
     if (!boardId) return;
     setSelected(null);
     setPanel(null);
+    setHist({ past: [], future: [] });
+    lastMerge.current = null;
     void loadBoard(boardId);
     const url = new URL(location.href);
     if (boardId === 'main') url.searchParams.delete('board');
@@ -101,7 +150,14 @@ export function Editor() {
     void loadBoards();
   });
 
-  const update = (next: Board) => {
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  /** Show and save a board, without touching undo history. */
+  const commit = (next: Board) => {
     setBoard(next);
     setSave('dirty');
     clearTimeout(saveTimer.current);
@@ -118,6 +174,120 @@ export function Editor() {
     }, 500);
   };
 
+  /**
+   * Change the board and remember the old one for undo. Changes sharing a `merge` key within
+   * a moment of each other (typing a title, nudging with arrow keys) undo as one step.
+   */
+  const update = (next: Board, merge?: string) => {
+    if (board) {
+      const now = Date.now();
+      const prev = lastMerge.current;
+      lastMerge.current = merge ? { key: merge, at: now } : null;
+      if (!(merge && prev?.key === merge && now - prev.at < MERGE_MS)) {
+        const before = board;
+        setHist((h) => ({ past: [...h.past.slice(1 - HISTORY_LIMIT), before], future: [] }));
+      }
+    }
+    commit(next);
+  };
+
+  const travel = (dir: 'undo' | 'redo') => {
+    if (!board) return;
+    const from = dir === 'undo' ? hist.past : hist.future;
+    if (!from.length) return;
+    const target = dir === 'undo' ? from[from.length - 1] : from[0];
+    setHist(
+      dir === 'undo'
+        ? { past: hist.past.slice(0, -1), future: [board, ...hist.future] }
+        : { past: [...hist.past, board], future: hist.future.slice(1) },
+    );
+    lastMerge.current = null;
+    setToast(null);
+    commit(target);
+    if (selected && !target.widgets.some((w) => w.id === selected)) {
+      setSelected(null);
+      setPanel(null);
+    }
+  };
+
+  const importLayout = async (file: File) => {
+    try {
+      const layout = JSON.parse(await file.text()) as unknown;
+      const b = await api.post<Board>('/api/boards', { layout });
+      await loadBoards();
+      setBoardId(b.id);
+      setToast({ text: `Imported “${b.name}” as a new board.`, undo: false });
+    } catch (e) {
+      setError(
+        e instanceof SyntaxError ? 'That file is not a Hearthboard layout.' : (e as Error).message,
+      );
+    }
+  };
+
+  // Keyboard shortcuts (see SHORTCUTS). Re-bound every render so they see the current board.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"], .modal')) return;
+      if (!board) return;
+      // Tab, arrows and Delete act on widgets only when focus isn't on a button or link.
+      const onCanvas = target === document.body || !!target?.closest('.editor-canvas');
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      if (mod && key === 'z') {
+        e.preventDefault();
+        travel(e.shiftKey ? 'redo' : 'undo');
+      } else if (mod && key === 'y') {
+        e.preventDefault();
+        travel('redo');
+      } else if (e.key === '?') {
+        setHelp(true);
+      } else if (key === 'Escape') {
+        setSelected(null);
+        setPanel(null);
+        setMenu(false);
+      } else if (!onCanvas) {
+        return;
+      } else if (key === 'Tab' && !mod && board.widgets.length) {
+        e.preventDefault();
+        const i = board.widgets.findIndex((w) => w.id === selected);
+        const n = board.widgets.length;
+        const next =
+          board.widgets[(i + (e.shiftKey ? n - 1 : 1) + (i < 0 && e.shiftKey ? 1 : 0)) % n];
+        setSelected(next.id);
+        setPanel('widget');
+      } else if (selected) {
+        const sel = board.widgets.find((w) => w.id === selected);
+        if (!sel) return;
+        if (key === 'Delete' || key === 'Backspace') {
+          e.preventDefault();
+          removeWidget(sel.id);
+        } else if (mod && key === 'd') {
+          e.preventDefault();
+          duplicate(sel);
+        } else if (key.startsWith('Arrow') && !mod) {
+          e.preventDefault();
+          const step = {
+            ArrowLeft: [-1, 0],
+            ArrowRight: [1, 0],
+            ArrowUp: [0, -1],
+            ArrowDown: [0, 1],
+          }[key];
+          if (!step) return;
+          const [a, b] = step;
+          const widgets = nudgeWidget(
+            board,
+            sel.id,
+            e.shiftKey ? { dw: a, dh: b } : { dx: a, dy: b },
+          );
+          if (widgets) update({ ...board, widgets }, `nudge:${sel.id}`);
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   if (boards && !boards.length)
     return <div className="widget-empty">You don't have a board yet. Ask an admin for one.</div>;
   if (!board) return <div className="widget-empty">{error ?? 'Loading…'}</div>;
@@ -128,8 +298,19 @@ export function Editor() {
   const canvasHeight = Math.round(((window.innerWidth - 12) * board.height) / board.width) + 12;
 
   const selectedWidget = board.widgets.find((w) => w.id === selected) ?? null;
-  const updateWidget = (id: string, patch: Partial<WidgetInstance>) =>
-    update({ ...board, widgets: board.widgets.map((w) => (w.id === id ? { ...w, ...patch } : w)) });
+  const updateWidget = (id: string, patch: Partial<WidgetInstance>, merge?: string) =>
+    update(
+      { ...board, widgets: board.widgets.map((w) => (w.id === id ? { ...w, ...patch } : w)) },
+      merge,
+    );
+
+  function removeWidget(id: string) {
+    if (!board) return;
+    update({ ...board, widgets: board.widgets.filter((w) => w.id !== id) });
+    setSelected(null);
+    setPanel(null);
+    setToast({ text: 'Widget removed.', undo: true });
+  }
 
   const addWidget = (type: WidgetType) => {
     setMenu(false);
@@ -144,13 +325,14 @@ export function Editor() {
     setPanel('widget');
   };
 
-  const duplicate = (w: WidgetInstance) => {
+  function duplicate(w: WidgetInstance) {
+    if (!board) return;
     const spot = findSpot({ ...board }, w.type);
     if (!spot) return setError('There is no free space for a copy.');
     const copy = { ...w, ...spot, w: Math.min(w.w, spot.w), h: Math.min(w.h, spot.h), id: newId() };
     update({ ...board, widgets: [...board.widgets, copy] });
     setSelected(copy.id);
-  };
+  }
 
   const newBoard = async () => {
     const name = prompt('Name for the new board (e.g. Kitchen, Kids room)');
@@ -191,7 +373,8 @@ export function Editor() {
           onChange={(e) =>
             e.target.value === '__new' ? void newBoard() : setBoardId(e.target.value)
           }
-          style={{ width: 'auto', maxWidth: 180 }}
+          className="board-picker"
+          style={{ width: 'auto' }}
         >
           {owners.length > 1
             ? owners.map((o) => {
@@ -208,7 +391,7 @@ export function Editor() {
         </select>
         <div style={{ position: 'relative' }}>
           <button className="btn primary" onClick={() => setMenu((m) => !m)}>
-            + Add widget
+            + Add<span className="hide-sm"> widget</span>
           </button>
           {menu && (
             <div className="menu">
@@ -228,6 +411,32 @@ export function Editor() {
           }}
         >
           ⚙︎ <span className="hide-sm">Board</span>
+        </button>
+        <button
+          className="btn ghost"
+          title={`Undo (${MOD} Z)`}
+          aria-label="Undo"
+          disabled={!hist.past.length}
+          onClick={() => travel('undo')}
+        >
+          ↶
+        </button>
+        <button
+          className="btn ghost"
+          title={`Redo (${MOD} Shift Z)`}
+          aria-label="Redo"
+          disabled={!hist.future.length}
+          onClick={() => travel('redo')}
+        >
+          ↷
+        </button>
+        <button
+          className="btn ghost hide-sm"
+          title="Keyboard shortcuts (?)"
+          aria-label="Keyboard shortcuts"
+          onClick={() => setHelp(true)}
+        >
+          ⌨︎
         </button>
         <span className="spacer" />
         <span className="save-state">
@@ -290,16 +499,11 @@ export function Editor() {
             <WidgetSettings
               key={selectedWidget.id}
               widget={selectedWidget}
-              onChange={(config) => updateWidget(selectedWidget.id, { config })}
+              onChange={(config) =>
+                updateWidget(selectedWidget.id, { config }, `config:${selectedWidget.id}`)
+              }
               onTextSize={(textSize) => updateWidget(selectedWidget.id, { textSize })}
-              onDelete={() => {
-                update({
-                  ...board,
-                  widgets: board.widgets.filter((w) => w.id !== selectedWidget.id),
-                });
-                setSelected(null);
-                setPanel(null);
-              }}
+              onDelete={() => removeWidget(selectedWidget.id)}
               onDuplicate={() => duplicate(selectedWidget)}
               onClose={() => {
                 setSelected(null);
@@ -312,7 +516,9 @@ export function Editor() {
           <div className="drawer">
             <BoardSettings
               board={board}
-              onChange={update}
+              onChange={(b) => update(b, 'board-settings')}
+              boards={list}
+              onImport={(file) => void importLayout(file)}
               onClose={() => setPanel(null)}
               onDelete={
                 list.filter((b) => b.ownerId === current?.ownerId).length > 1
@@ -328,6 +534,17 @@ export function Editor() {
           </div>
         )}
       </div>
+      {toast && (
+        <div className="toast" role="status">
+          {toast.text}
+          {toast.undo && hist.past.length > 0 && (
+            <button className="btn small" onClick={() => travel('undo')}>
+              Undo
+            </button>
+          )}
+        </div>
+      )}
+      {help && <ShortcutHelp onClose={() => setHelp(false)} />}
     </div>
   );
 }

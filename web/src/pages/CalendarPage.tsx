@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { DateSelectArg, EventChangeArg } from '@fullcalendar/core';
-import type { CalendarDTO, EventDTO } from '@hearthboard/shared';
+import { parseQuickAdd, type CalendarDTO, type EventDTO } from '@hearthboard/shared';
 import { api } from '../api';
 import { Modal, TopBar } from '../components/TopBar';
 import { useLiveQuery } from '../live';
@@ -275,6 +275,121 @@ function EventDialog({
   );
 }
 
+/** Whether this device writes dates day-first (3/10 = 3 October). */
+function localeDayFirst(): boolean {
+  const parts = new Intl.DateTimeFormat(undefined).formatToParts(new Date(2000, 11, 31));
+  const types = parts.map((p) => p.type);
+  return types.indexOf('day') < types.indexOf('month');
+}
+
+function describeWhen(r: { start: Date; end: Date; allDay: boolean }): string {
+  const day = (d: Date) =>
+    d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  if (r.allDay) {
+    const last = new Date(r.end.getFullYear(), r.end.getMonth(), r.end.getDate() - 1);
+    return last > r.start ? `${day(r.start)} – ${day(last)}, all day` : `${day(r.start)}, all day`;
+  }
+  const sameDay = r.start.toDateString() === r.end.toDateString();
+  return `${day(r.start)}, ${time(r.start)} – ${sameDay ? '' : `${day(r.end)} `}${time(r.end)}`;
+}
+
+/** One line to add an event: "Soccer Sat 9-10:30am @ Riverside Park". */
+function QuickAdd({
+  calendars,
+  defaultCalendar,
+  onAdded,
+}: {
+  calendars: CalendarDTO[];
+  defaultCalendar: string;
+  onAdded: (calendarId: string, start: Date) => void;
+}) {
+  const [text, setText] = useState('');
+  const [calendarId, setCalendarId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const dayFirst = useMemo(localeDayFirst, []);
+  const parsed = useMemo(
+    () => (text.trim() ? parseQuickAdd(text, new Date(), { dayFirst }) : null),
+    [text, dayFirst],
+  );
+  const writable = calendars.filter((c) => c.writable && c.enabled);
+  const cal = writable.find((c) => c.id === calendarId)?.id ?? defaultCalendar;
+  if (!writable.length) return null;
+
+  const add = async () => {
+    if (!parsed) return;
+    setBusy(true);
+    try {
+      await api.post('/api/events', {
+        calendarId: cal,
+        title: parsed.title,
+        location: parsed.location,
+        allDay: parsed.allDay,
+        start: parsed.allDay ? toDateInput(parsed.start) : parsed.start.toISOString(),
+        end: parsed.allDay ? toDateInput(parsed.end) : parsed.end.toISOString(),
+      });
+      setMsg({ ok: true, text: `Added “${parsed.title}”: ${describeWhen(parsed)}` });
+      setText('');
+      onAdded(cal, parsed.start);
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form
+      className="quick-add"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void add();
+      }}
+    >
+      <div className="row">
+        <input
+          className="grow"
+          type="text"
+          aria-label="Quick add"
+          placeholder="Quick add: “Soccer Sat 9-10:30am @ Riverside Park”"
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setMsg(null);
+          }}
+        />
+        {writable.length > 1 && (
+          <select
+            aria-label="Calendar"
+            value={cal}
+            onChange={(e) => setCalendarId(e.target.value)}
+            style={{ width: 'auto', maxWidth: 160 }}
+          >
+            {writable.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <button className="btn primary" disabled={busy || !parsed}>
+          Add
+        </button>
+      </div>
+      <div className={`quick-add-preview ${msg && !msg.ok ? 'error-text' : ''}`}>
+        {msg
+          ? msg.text
+          : parsed
+            ? `${parsed.title} · ${describeWhen(parsed)}${parsed.location ? ` · 📍 ${parsed.location}` : ''}`
+            : text.trim()
+              ? 'Start with a title, then when: “Dentist Oct 3 2:30pm”'
+              : ''}
+      </div>
+    </form>
+  );
+}
+
 type View = 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek';
 
 /** Full-screen interactive calendar: drag to move, stretch to resize, select to create. */
@@ -289,6 +404,7 @@ export function CalendarPage() {
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const [focusDate, setFocusDate] = useState<Date | null>(null);
   const [lastCal, setLastCal] = useState<string>(
     () => localStorage.getItem('hb:lastCalendar') ?? '',
   );
@@ -363,9 +479,21 @@ export function CalendarPage() {
         </div>
       )}
       <div className="calendar-page">
+        {calendars && (
+          <QuickAdd
+            calendars={calendars}
+            defaultCalendar={defaultCalendar()}
+            onAdded={(calendarId, start) => {
+              localStorage.setItem('hb:lastCalendar', calendarId);
+              setLastCal(calendarId);
+              setFocusDate(start);
+            }}
+          />
+        )}
         <div className="cal">
           <CalendarView
             view={initialView}
+            focusDate={focusDate}
             editable
             toolbar={{
               left: 'prev,next today',

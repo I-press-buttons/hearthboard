@@ -5,6 +5,8 @@ const PORT = 8123;
 export default defineConfig({
   testDir: 'e2e',
   timeout: 60_000,
+  // Every test talks to the same demo server and changes its data, so run them one at a time.
+  workers: 1,
   retries: process.env.CI ? 1 : 0,
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,

@@ -33,6 +33,34 @@ phone or PC.
 - **Made for a wall:** seven color themes, five text sizes (per board or per widget), optional night dimming, burn-in
   protection, reconnects by itself, and reloads nightly to pick up updates.
 
+### New in this release
+
+Each of these has a full section in the **[feature guide](docs/features.md)**.
+
+1. **Weather widget:** current conditions and up to a 7-day forecast from Open-Meteo. Free,
+   no API key, and it keeps showing the last forecast if the internet drops.
+2. **Countdown widget:** "12 sleeps until the beach". Type in dates, repeat birthdays every
+   year, or count down to any calendar event with a keyword like 🎉 in its title.
+3. **Meal plan:** plan the week's meals from your phone on the new **Family** page and show them
+   on the board. One tap fills the week from last week.
+4. **Family notes:** sticky notes posted from a phone that come down by themselves when they
+   expire.
+5. **Subscribed calendars:** add any `.ics` / `webcal://` calendar (school, sports, a shared
+   Google or iCloud calendar), with one-tap public holidays for the US, UK, Canada, Australia
+   and Christian holidays.
+6. **Quick add in plain words:** type "Soccer Sat 9-10:30am @ Riverside Park" on the Calendar
+   page, check the preview, and press Enter.
+7. **Undo, redo and keyboard shortcuts** in the layout editor: ↶ ↷ buttons for phones, and arrow
+   keys to nudge and resize widgets (press `?` for the full list).
+8. **Touch-screen mode:** on a wall tablet, anyone can tick checklists and reminders without
+   signing in, and the screen can stay awake. Tap for a full-screen button on any display.
+9. **Board schedules:** show a morning-routine board on school mornings, or a dinner board at
+   6 PM, and switch back by themselves.
+10. **Export and import layouts:** save a board as a file to back it up or copy it to another
+    Hearthboard.
+
+![Weather, countdown, notes and meal plan widgets](docs/images/new-widgets.png)
+
 | Layout editor (PC)                | Calendar page                         | Editor on a phone                             |
 | --------------------------------- | ------------------------------------- | --------------------------------------------- |
 | ![Editor](docs/images/editor.png) | ![Calendar](docs/images/calendar.png) | ![Phone editor](docs/images/editor-phone.png) |
@@ -63,15 +91,17 @@ environment.
 
 ## Pages
 
-| URL         | What it's for                                                                                                    |
-| ----------- | ---------------------------------------------------------------------------------------------------------------- |
-| `/`         | The wall display. Read-only, no login. `/?board=<id>` shows another board.                                       |
-| `/edit`     | Arrange widgets: drag the ⠿ pill to move, drag edges to resize, ⚙︎ for board settings.                            |
-| `/calendar` | Full calendar: drag to move, stretch to resize, select a time range to create, click to edit or delete.          |
-| `/settings` | Your account and two-step sign-in, people, time zone and sync, calendars, reminders, photos, checklists, verses. |
+| URL         | What it's for                                                                                                                     |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `/`         | The wall display. Read-only, no login. `/?board=<id>` shows another board.                                                        |
+| `/edit`     | Arrange widgets: drag the ⠿ pill to move, drag edges to resize, ⚙︎ for board settings, ↶ ↷ to undo (`?` for shortcuts).            |
+| `/calendar` | Full calendar: quick add in plain words, drag to move, stretch to resize, select a time range to create, click to edit or delete. |
+| `/family`   | Day-to-day things from your phone: post notes to the board, plan the week's meals.                                                |
+| `/settings` | Your account and two-step sign-in, people, time zone and sync, calendars, reminders, photos, checklists, verses.                  |
 
 Anyone on your network can look at a board: TVs don't sign in. Changing
-anything needs a sign-in.
+anything needs a sign-in, except ticking checklists and reminders on a board in
+[touch-screen mode](docs/features.md#8-touch-screen-mode-for-a-wall-tablet).
 
 ## People and sign-in
 
@@ -89,7 +119,7 @@ Add everyone else under **Settings → People**. Each person gets:
   people, connect calendar accounts and Synology Photos, and see the reminders
   token.
 
-Calendars, reminders, photos and checklists are shared by the household. To
+Calendars, reminders, photos, checklists, notes and the meal plan are shared by the household. To
 give someone a board with just their calendar, pick it under the calendar
 widget's settings.
 
@@ -129,7 +159,11 @@ Accounts and settings live in the web app under **Settings**, not in Docker:
   sign-in.
 - **General** (admins): time zone, how often calendars sync, and the public
   HTTPS address used for Google sign-in.
-- **Calendars, Apple Reminders, Photos** (admins): every account sign-in.
+- **Calendars, Apple Reminders, Photos** (admins): every account sign-in, and
+  calendar subscriptions (holidays, school, sports).
+- **Checklists, Verses & quotes** (everyone).
+
+Notes and the meal plan live on the **Family** page.
 
 They're stored in `/data` and survive container updates. The time zone
 starts as the one of the device you created the first account on.
@@ -173,8 +207,10 @@ point at a theme or size you later remove fall back to the defaults.
  iPhone Shortcut ──POST reminders──┐
                                    ▼
  iCloud (CalDAV) ◀──two-way──▶  ┌──────────────────────────┐ ◀──WebSocket── TV / tablet  (/)
- Google Calendar ◀──two-way──▶  │  Hearthboard (Node.js)   │ ◀──HTTP─────── phone / PC   (/edit, /calendar, /settings)
- Synology Photos ──read-only──▶ │  SQLite in /data         │
+ Google Calendar ◀──two-way──▶  │  Hearthboard (Node.js)   │ ◀──HTTP─────── phone / PC   (/edit, /calendar, /family, /settings)
+ .ics / webcal ───read-only──▶  │  SQLite in /data         │
+ Open-Meteo ──────read-only──▶  │                          │
+ Synology Photos ──read-only──▶ │                          │
  /photos (ro mount) ──────────▶ └──────────────────────────┘
 ```
 
@@ -188,6 +224,11 @@ point at a theme or size you later remove fall back to the defaults.
     events, exceptions and time zones are expanded and edited in iCalendar
     itself.
   - Google uses the Calendar API with incremental sync tokens.
+  - Subscribed `.ics` feeds are downloaded at most every 15 minutes (with
+    `If-None-Match`) and split into one stored event per UID, so they go through
+    the same expansion code as CalDAV.
+- **Weather:** Open-Meteo, fetched by the server and cached for 15 minutes per
+  place, so every screen shares one request.
 - **Web:** React, [react-grid-layout](https://github.com/react-grid-layout/react-grid-layout)
   for the board and [FullCalendar](https://fullcalendar.io/) (MIT plugins)
   for the calendar. A board is designed for one resolution (e.g. 1920×1080)
@@ -226,6 +267,8 @@ npm run lint && npm run typecheck && npm run format:check
 docker build -t hearthboard .
 ```
 
+The end-to-end tests share one demo server, so they run one at a time.
+
 Repository layout: `shared/` (types and schemas used by both sides),
 `server/` (API, sync, providers), `web/` (the React app), `e2e/`
 (Playwright) and `docs/` (setup guides).
@@ -237,7 +280,11 @@ Repository layout: `shared/` (types and schemas used by both sides),
 - **Calendar range:** the board caches from about 3 months back to about 13
   months ahead.
 - **Subscribed calendars:** iCloud _subscribed_ calendars (holiday and sports
-  feeds) aren't available over CalDAV.
+  feeds) aren't available over CalDAV. Add them by their `webcal://` address
+  instead, under **Settings → Calendars → Subscribe to a calendar**. They're
+  read-only on the board.
+- **Weather** needs the NAS to reach `api.open-meteo.com`. Keeping a tablet
+  awake from the browser needs HTTPS.
 - **Photos:** HEIC photos show only once Synology Photos has generated their
   previews. The Synology Photos album mode needs a DSM account without 2-factor
   sign-in.

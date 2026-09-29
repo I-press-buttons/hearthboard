@@ -1,7 +1,12 @@
 import crypto from 'node:crypto';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { Board, type BoardSummary, type WidgetInstance } from '@hearthboard/shared';
+import {
+  Board,
+  boardFromExport,
+  type BoardSummary,
+  type WidgetInstance,
+} from '@hearthboard/shared';
 import type { DB } from './db';
 import type { LiveHub } from './live';
 import type { Auth } from './auth';
@@ -9,6 +14,16 @@ import type { UserRow } from './users';
 import { HttpError } from './util';
 
 const newBoardId = () => crypto.randomBytes(4).toString('hex');
+const newWidgetId = () => crypto.randomBytes(6).toString('hex');
+
+/** Header a display sends to say which board it's showing (for touch-screen mode). */
+export const BOARD_HEADER = 'x-hearthboard-board';
+
+/**
+ * Whether a request may skip signing in because it comes from a touch-screen board showing a
+ * widget that `match` accepts.
+ */
+export type TouchGate = (req: FastifyRequest, match: (w: WidgetInstance) => boolean) => boolean;
 
 export function defaultWidgets(checklistId: string): WidgetInstance[] {
   const id = () => crypto.randomBytes(6).toString('hex');
@@ -98,6 +113,14 @@ export class Boards {
     this.live.publish('board');
   }
 
+  /** See TouchGate. */
+  touchGate: TouchGate = (req, match) => {
+    const id = req.headers[BOARD_HEADER];
+    if (typeof id !== 'string' || !id) return false;
+    const board = this.get(id);
+    return !!board?.interactive && board.widgets.some(match);
+  };
+
   /** Create the first board on a fresh install. */
   ensureDefault(checklistId: string) {
     const count = (this.db.prepare('SELECT COUNT(*) AS n FROM boards').get() as { n: number }).n;
@@ -130,7 +153,18 @@ export class Boards {
     });
 
     app.post('/api/boards', signedIn, async (req) => {
-      const body = (req.body ?? {}) as { name?: string; copyFrom?: string };
+      const body = (req.body ?? {}) as { name?: string; copyFrom?: string; layout?: unknown };
+      // Import an exported layout (see "Export layout" in Board settings).
+      if (body.layout !== undefined) {
+        let board: Board;
+        try {
+          board = boardFromExport(body.layout, newBoardId(), newWidgetId);
+        } catch (err) {
+          throw new HttpError(400, (err as Error).message);
+        }
+        if (body.name) board.name = body.name.slice(0, 100);
+        return this.create(req.user!.id, board);
+      }
       const base = body.copyFrom ? this.get(body.copyFrom) : null;
       return this.create(
         req.user!.id,

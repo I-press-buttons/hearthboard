@@ -14,6 +14,8 @@ import type { Config } from './config';
 import { openDb, type DB } from './db';
 import { ensureDemoPhotos, seedDemo } from './demo';
 import { LiveHub } from './live';
+import { Meals } from './meals';
+import { Notes } from './notes';
 import { Photos } from './photos';
 import { Quotes } from './quotes';
 import { Reminders } from './reminders';
@@ -21,6 +23,7 @@ import { SecretBox } from './secrets';
 import { applyTimeZone, SystemSettings } from './system';
 import { Users } from './users';
 import { HttpError } from './util';
+import { Weather } from './weather';
 
 export interface AppContext {
   app: FastifyInstance;
@@ -35,6 +38,9 @@ export interface AppContext {
   photos: Photos;
   quotes: Quotes;
   system: SystemSettings;
+  meals: Meals;
+  notes: Notes;
+  weather: Weather;
 }
 
 export interface BuildOptions {
@@ -42,6 +48,8 @@ export interface BuildOptions {
   background?: boolean;
   providerFactory?: ProviderFactory;
   logger?: boolean;
+  /** Stand-in for Open-Meteo, for tests. */
+  weatherFetch?: typeof fetch;
 }
 
 export async function buildApp(config: Config, opts: BuildOptions = {}): Promise<AppContext> {
@@ -76,6 +84,9 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   const checklists = new Checklists(db, live);
   const reminders = new Reminders(db, live);
   const quotes = new Quotes(db, live);
+  const meals = new Meals(db, live);
+  const notes = new Notes(db, live);
+  const weather = new Weather({ fetch: opts.weatherFetch, demo: config.demo });
   const photos = new Photos(
     db,
     secrets,
@@ -115,15 +126,18 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     transferBoards: (fromId, toId) => boards.transfer(fromId, toId),
   });
   boards.register(app, auth);
-  checklists.register(app, auth);
-  reminders.register(app, auth);
+  checklists.register(app, auth, boards.touchGate);
+  reminders.register(app, auth, boards.touchGate);
+  meals.register(app, auth);
+  notes.register(app, auth);
+  weather.register(app, auth);
   quotes.register(app, auth);
   photos.register(app, auth);
   system.register(app, auth);
   registerCalendarRoutes(app, calendars, auth, system);
 
   boards.ensureDefault(checklists.ensureDefault());
-  if (config.demo) await seedDemo({ calendars, reminders, checklists });
+  if (config.demo) await seedDemo({ calendars, reminders, checklists, meals, notes });
 
   // Serve the built web app; client-side routes fall back to index.html.
   if (fs.existsSync(path.join(config.webDir, 'index.html'))) {
@@ -139,9 +153,11 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   if (background) {
     calendars.start(system.get().syncIntervalSec);
     const stopReset = checklists.startDailyReset();
+    const stopExpiry = notes.startExpiry();
     app.addHook('onClose', async () => {
       calendars.stop();
       stopReset();
+      stopExpiry();
     });
   }
   system.onChange((s) => {
@@ -166,5 +182,8 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     photos,
     quotes,
     system,
+    meals,
+    notes,
+    weather,
   };
 }

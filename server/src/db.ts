@@ -131,6 +131,25 @@ export const MIGRATIONS: (string | ((db: DB) => void))[] = [
       db.prepare("DELETE FROM settings WHERE key = 'adminPin'").run();
     }
   },
+
+  // Meal plan and family notes.
+  `
+  CREATE TABLE meals (
+    date TEXT NOT NULL,
+    slot TEXT NOT NULL,
+    text TEXT NOT NULL,
+    PRIMARY KEY (date, slot)
+  );
+  CREATE TABLE notes (
+    id TEXT PRIMARY KEY,
+    text TEXT NOT NULL,
+    color TEXT NOT NULL,
+    author_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    author_name TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER
+  );
+  `,
 ];
 
 export function openDb(file: string): DB {

@@ -9,9 +9,13 @@ import type { WidgetSize } from '../board/BoardCanvas';
 import { CalendarWidget } from './Calendar';
 import { ChecklistWidget } from './Checklist';
 import { ClockWidget } from './Clock';
+import { CountdownWidget } from './Countdown';
+import { MealsWidget } from './Meals';
+import { NotesWidget } from './Notes';
 import { PhotoWidget } from './Photo';
 import { QuoteWidget } from './Quote';
 import { RemindersWidget } from './Reminders';
+import { WeatherWidget } from './Weather';
 import type { WidgetDef, WidgetProps } from './types';
 
 export const WIDGETS: { [K in WidgetType]: WidgetDef<K> } = {
@@ -154,6 +158,100 @@ export const WIDGETS: { [K in WidgetType]: WidgetDef<K> } = {
     fields: [
       { key: 'checklistId', label: 'Checklist', type: 'checklist' },
       { key: 'hideDone', label: 'Hide finished items', type: 'bool' },
+    ],
+  },
+  weather: {
+    type: 'weather',
+    label: 'Weather',
+    icon: '⛅',
+    Component: WeatherWidget,
+    fields: [
+      { key: 'place', label: 'Place', type: 'place' },
+      {
+        key: 'units',
+        label: 'Units',
+        type: 'select',
+        options: [
+          ['auto', 'Automatic'],
+          ['f', '°F and mph'],
+          ['c', '°C and km/h'],
+        ],
+      },
+      { key: 'days', label: 'Days of forecast', type: 'number', min: 0, max: 7 },
+    ],
+  },
+  countdown: {
+    type: 'countdown',
+    label: 'Countdown',
+    icon: '⏳',
+    Component: CountdownWidget,
+    fields: [
+      { key: 'title', label: 'Title', type: 'text' },
+      { key: 'entries', label: 'Dates', type: 'countdowns' },
+      {
+        key: 'keyword',
+        label: 'Also count down to calendar events whose title contains',
+        type: 'text',
+        placeholder: 'e.g. 🎉 or #countdown (leave empty for none)',
+      },
+      {
+        key: 'unit',
+        label: 'Count in',
+        type: 'select',
+        options: [
+          ['days', 'Days'],
+          ['sleeps', 'Sleeps (for the kids)'],
+        ],
+      },
+      { key: 'maxItems', label: 'Show at most', type: 'number', min: 1, max: 30 },
+    ],
+  },
+  meals: {
+    type: 'meals',
+    label: 'Meal plan',
+    icon: '🍽️',
+    Component: MealsWidget,
+    fields: [
+      { key: 'title', label: 'Title', type: 'text' },
+      {
+        key: 'slots',
+        label: 'Meals',
+        type: 'multi',
+        options: [
+          ['breakfast', 'Breakfast'],
+          ['lunch', 'Lunch'],
+          ['dinner', 'Dinner'],
+        ],
+      },
+      { key: 'days', label: 'Days', type: 'number', min: 1, max: 14 },
+      {
+        key: 'startOn',
+        label: 'Start from',
+        type: 'select',
+        options: [
+          ['today', 'Today'],
+          ['week', 'The start of the week (Sunday)'],
+        ],
+      },
+    ],
+  },
+  notes: {
+    type: 'notes',
+    label: 'Family notes',
+    icon: '📝',
+    Component: NotesWidget,
+    fields: [
+      { key: 'title', label: 'Title', type: 'text' },
+      {
+        key: 'style',
+        label: 'Look',
+        type: 'select',
+        options: [
+          ['sticky', 'Sticky notes'],
+          ['list', 'A simple list'],
+        ],
+      },
+      { key: 'maxItems', label: 'Show at most', type: 'number', min: 1, max: 30 },
     ],
   },
 };
