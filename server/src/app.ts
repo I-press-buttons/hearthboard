@@ -56,7 +56,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
   const background = opts.background ?? true;
   const app = Fastify({
     logger: opts.logger ?? false,
-    trustProxy: true,
+    trustProxy: config.trustProxy,
     bodyLimit: 5 * 1024 * 1024,
   });
   const db = openDb(

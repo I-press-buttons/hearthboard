@@ -1,19 +1,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-function chownTree(p: string, uid: number, gid: number) {
+function lchown(p: string, uid: number, gid: number): boolean {
   try {
     fs.lchownSync(p, uid, gid);
+    return true;
   } catch {
-    return;
+    return false;
   }
+}
+
+function chownTree(p: string, uid: number, gid: number) {
+  if (!lchown(p, uid, gid)) return;
   let entries: fs.Dirent[] = [];
   try {
     entries = fs.readdirSync(p, { withFileTypes: true });
   } catch {
     return;
   }
-  for (const e of entries) chownTree(path.join(p, e.name), uid, gid);
+  for (const e of entries) {
+    // Only walk into real folders: following a symlink could hand files outside /data to PUID.
+    if (e.isDirectory()) chownTree(path.join(p, e.name), uid, gid);
+    else lchown(path.join(p, e.name), uid, gid);
+  }
 }
 
 /**

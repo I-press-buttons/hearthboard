@@ -26,6 +26,8 @@ const SESSION_TTL_MS = 365 * 24 * 3600 * 1000;
 const PENDING_TTL_MS = 15 * 60_000;
 /** Wrong codes allowed before the password has to be entered again. */
 const MAX_CODE_ATTEMPTS = 5;
+/** Wrong passwords or codes from one address are forgotten after this long without another. */
+const FAILURE_MEMORY_MS = 3600_000;
 
 type Stage = 'mfa' | 'enroll' | 'full';
 
@@ -48,7 +50,7 @@ export interface AuthOptions {
 }
 
 export class Auth {
-  private failures = new Map<string, { count: number; until: number }>();
+  private failures = new Map<string, { count: number; until: number; last: number }>();
 
   constructor(
     private db: DB,
@@ -227,11 +229,28 @@ export class Auth {
   }
 
   private recordFailure(req: FastifyRequest) {
-    const count = (this.failures.get(req.ip)?.count ?? 0) + 1;
+    const now = Date.now();
+    if (this.failures.size > 1000) {
+      for (const [ip, f] of this.failures) {
+        if (now - f.last > FAILURE_MEMORY_MS && f.until < now) this.failures.delete(ip);
+      }
+    }
+    const prev = this.failures.get(req.ip);
+    const count = (prev && now - prev.last < FAILURE_MEMORY_MS ? prev.count : 0) + 1;
     this.failures.set(req.ip, {
       count,
-      until: count >= 5 ? Date.now() + 30_000 * (count - 4) : 0,
+      until: count >= 5 ? now + 30_000 * (count - 4) : 0,
+      last: now,
     });
+  }
+
+  /** Check the signed-in user's password again before a sensitive change, with the lockout. */
+  private async confirmPassword(req: FastifyRequest, password: string, error: string) {
+    this.checkThrottle(req);
+    if (!(await this.users.checkPassword(req.user!, password))) {
+      this.recordFailure(req);
+      throw new HttpError(400, error);
+    }
   }
 
   // ---------------- routes ----------------
@@ -314,12 +333,8 @@ export class Auth {
     });
 
     app.post('/api/auth/password', signedIn, async (req) => {
-      this.checkThrottle(req);
       const { current, password } = PasswordChange.parse(req.body);
-      if (!(await this.users.checkPassword(req.user!, current))) {
-        this.recordFailure(req);
-        throw new HttpError(400, 'Your current password is not right.');
-      }
+      await this.confirmPassword(req, current, 'Your current password is not right.');
       await this.users.setPassword(req.user!.id, password);
       this.endSessions(req.user!.id, req);
       return { ok: true };
@@ -355,17 +370,17 @@ export class Auth {
 
     app.post('/api/auth/totp/disable', signedIn, async (req) => {
       const { password } = PasswordConfirm.parse(req.body);
-      if (!(await this.users.checkPassword(req.user!, password)))
-        throw new HttpError(400, 'Your password is not right.');
+      await this.confirmPassword(req, password, 'Your password is not right.');
       this.users.disableTotp(req.user!.id);
+      // Required for everyone: other devices sign in and set it up again (this one next time).
+      if (this.requireMfa()) this.endSessions(req.user!.id, req);
       return { ok: true };
     });
 
     app.post('/api/auth/recovery-codes', signedIn, async (req) => {
       const { password } = PasswordConfirm.parse(req.body);
       if (!req.user!.totp_secret) throw new HttpError(400, 'Two-step sign-in is off.');
-      if (!(await this.users.checkPassword(req.user!, password)))
-        throw new HttpError(400, 'Your password is not right.');
+      await this.confirmPassword(req, password, 'Your password is not right.');
       return { recoveryCodes: this.users.newRecoveryCodes(req.user!.id) };
     });
 

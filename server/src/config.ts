@@ -6,9 +6,22 @@ function num(env: NodeJS.ProcessEnv, name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/**
+ * Which X-Forwarded-* headers to believe. Off unless set: otherwise anyone could pick their own
+ * IP address and dodge the sign-in lockout. `true` trusts any proxy; anything else is a
+ * comma-separated list of the proxy's addresses or CIDR ranges.
+ */
+function trustProxy(v: string | undefined): boolean | string {
+  if (!v || ['0', 'false', 'no'].includes(v.toLowerCase())) return false;
+  if (['1', 'true', 'yes'].includes(v.toLowerCase())) return true;
+  return v;
+}
+
 export interface Config {
   port: number;
   host: string;
+  /** Reverse proxy in front of the server, whose X-Forwarded-For/-Proto to believe. */
+  trustProxy: boolean | string;
   dataDir: string;
   photosDir: string;
   webDir: string;
@@ -35,6 +48,7 @@ export function loadConfig(env = process.env): Config {
   return {
     port: num(env, 'PORT', 8080),
     host: env.HOST ?? '0.0.0.0',
+    trustProxy: trustProxy(env.HEARTHBOARD_TRUST_PROXY),
     dataDir,
     photosDir: path.resolve(env.HEARTHBOARD_PHOTOS ?? '/photos'),
     webDir: path.resolve(env.HEARTHBOARD_WEB ?? path.join(import.meta.dirname, '../../web/dist')),
