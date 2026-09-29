@@ -1,5 +1,6 @@
 # Hearthboard on a Synology NAS (Container Manager → Project → Create → paste this).
 # Then open http://<nas-ip>:8080/edit from a phone or PC and create your sign-in.
+# Everything else (time zone, accounts, sync interval, people) is set in the web app under Settings.
 services:
   hearthboard:
     image: ghcr.io/i-press-buttons/hearthboard:latest
@@ -10,20 +11,13 @@ services:
     ports:
       - '8080:8080'
     environment:
-      # Your time zone, so "today", all-day events and night dimming are right.
-      TZ: America/Chicago
       # Run as your DSM user so it can read your photos. Find these with `id` over SSH
       # (the first DSM user is usually 1026, group "users" is 100).
       PUID: '1026'
       PGID: '100'
-      # How often calendars are polled, in seconds.
-      HEARTHBOARD_SYNC_INTERVAL: '60'
       # Optional: create an "admin" user with this password on first start, instead of
       # on first visit.
       # HEARTHBOARD_ADMIN_PASSWORD: "choose a long password"
-      # Optional: an HTTPS address that reaches this container (e.g. via DSM's reverse
-      # proxy + Let's Encrypt) lets Google sign-in redirect straight back.
-      # HEARTHBOARD_PUBLIC_URL: "https://board.example.synology.me"
       # Try it with sample data first:
       # HEARTHBOARD_DEMO: "1"
     volumes:

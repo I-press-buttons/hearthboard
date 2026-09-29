@@ -240,13 +240,22 @@ export class CalendarService {
   // ---------- sync ----------
 
   start(intervalSec: number) {
+    this.stop();
     const tick = () => void this.syncAll();
     tick();
     this.timer = setInterval(tick, intervalSec * 1000);
   }
 
+  /** Change the polling interval if polling is running. */
+  reschedule(intervalSec: number) {
+    if (!this.timer) return;
+    clearInterval(this.timer);
+    this.timer = setInterval(() => void this.syncAll(), intervalSec * 1000);
+  }
+
   stop() {
     if (this.timer) clearInterval(this.timer);
+    this.timer = null;
   }
 
   async syncAll() {

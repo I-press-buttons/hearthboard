@@ -120,7 +120,7 @@ export const WIDGETS: { [K in WidgetType]: WidgetDef<K> } = {
         label: 'Show',
         type: 'select',
         options: [
-          ['verse', 'Bible verse (KJV)'],
+          ['verse', 'Bible verse (ESV)'],
           ['quote', 'Quote'],
           ['both', 'Alternate verse and quote'],
           ['custom', 'My own entries (Settings)'],

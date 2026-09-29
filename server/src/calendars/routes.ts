@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { EventDelete, EventInput, EventPatch } from '@hearthboard/shared';
 import type { Auth } from '../auth';
-import type { Config } from '../config';
+import type { SystemSettings } from '../system';
 import { HttpError } from '../util';
 import { ICLOUD_CALDAV_URL } from './caldav';
 import {
@@ -54,7 +54,7 @@ export function registerCalendarRoutes(
   app: FastifyInstance,
   svc: CalendarService,
   auth: Auth,
-  config: Config,
+  system: SystemSettings,
 ) {
   const guard = { preHandler: auth.guard };
   // Connecting, removing and recolouring the household's calendars.
@@ -98,9 +98,8 @@ export function registerCalendarRoutes(
 
   app.post('/api/accounts/google/start', admin, async (req) => {
     const body = GoogleStart.parse(req.body);
-    const redirectUri = config.publicUrl
-      ? `${config.publicUrl}/api/google/callback`
-      : GOOGLE_LOOPBACK_REDIRECT;
+    const { publicUrl } = system.get();
+    const redirectUri = publicUrl ? `${publicUrl}/api/google/callback` : GOOGLE_LOOPBACK_REDIRECT;
     const state = crypto.randomBytes(16).toString('base64url');
     pending.set(state, { ...body, redirectUri, expires: Date.now() + 15 * 60_000 });
     return { authUrl: googleAuthUrl(body.clientId.trim(), redirectUri, state), state, redirectUri };
@@ -111,7 +110,7 @@ export function registerCalendarRoutes(
     return finishGoogle(body.state, body.code, body.name);
   });
 
-  // Only reachable when HEARTHBOARD_PUBLIC_URL points at an HTTPS name Google accepts.
+  // Only reachable when the public address (Settings → General) points at an HTTPS name Google accepts.
   app.get<{ Querystring: { state?: string; code?: string; error?: string } }>(
     '/api/google/callback',
     async (req, reply) => {

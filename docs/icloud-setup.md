@@ -3,7 +3,7 @@
 Hearthboard talks to iCloud over CalDAV, the same way Thunderbird or a
 Windows calendar app would. Events you create, drag, resize or edit on the
 board are written to iCloud, and changes made on your iPhone, iPad or Mac show
-up on the board within a minute (every `HEARTHBOARD_SYNC_INTERVAL` seconds).
+up on the board within a minute (change how often under Settings → General).
 
 ## 1. Make an app-specific password
 

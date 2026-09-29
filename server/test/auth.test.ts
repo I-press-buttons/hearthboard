@@ -459,6 +459,21 @@ describe('upgrading and recovery', () => {
     });
   });
 
+  it('uses the environment password only to create the admin, so changes survive restarts', async () => {
+    app = await testApp({ adminPassword: 'from the environment' });
+    await app.signIn('admin', 'from the environment');
+    await app.inject('POST', '/api/auth/password', {
+      current: 'from the environment',
+      password: 'changed in settings',
+    });
+    const dataDir = app.config.dataDir;
+    await app.app.close();
+
+    app = await testApp({ dataDir, adminPassword: 'from the environment' });
+    expect((await app.signIn('admin', 'from the environment')).status).toBe(401);
+    expect((await app.signIn('admin', 'changed in settings')).status).toBe(200);
+  });
+
   it('HEARTHBOARD_RESET_ADMIN gets a locked-out admin back in', async () => {
     const dataDir = tmpDir();
     app = await testApp({ dataDir });

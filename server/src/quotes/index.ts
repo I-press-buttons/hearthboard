@@ -5,12 +5,12 @@ import type { QuoteDTO } from '@hearthboard/shared';
 import type { DB } from '../db';
 import type { LiveHub } from '../live';
 import type { Auth } from '../auth';
-import verses from './data/verses-kjv.json' with { type: 'json' };
+import verses from './data/verses-esv.json' with { type: 'json' };
 import quotes from './data/quotes.json' with { type: 'json' };
 
 const VERSES = (verses as [string, string][]).map(([text, source]) => ({
   text,
-  source: `${source} (KJV)`,
+  source: `${source} (ESV)`,
 }));
 const QUOTES = (quotes as [string, string][]).map(([text, source]) => ({ text, source }));
 

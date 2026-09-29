@@ -19,8 +19,8 @@ phone or PC.
   completes it on your phone.
 - **Photos from Synology Photos:** a slideshow from your photo library, or
   from one album. iPhone HEIC photos use the previews Synology already made.
-- **Bible verse or quote of the day:** a built-in list of King James Version
-  verses (public domain) plus quotes, or your own entries.
+- **Bible verse or quote of the day:** a built-in list of ESV verses plus
+  quotes, or your own entries.
 - **Checklists:** chores, groceries, packing lists. Optionally untick
   everything at midnight.
 - **A clock.**
@@ -40,9 +40,10 @@ phone or PC.
 ## Install on a Synology NAS
 
 The short version: in **Container Manager → Project → Create**, paste
-[`docker-compose.yml`](docker-compose.yml), then set your time zone, your
-`PUID`/`PGID` and the path to your photos. Then open
-`http://<nas-ip>:8080/edit`.
+[`docker-compose.yml`](docker-compose.yml), then set your `PUID`/`PGID` and
+the path to your photos. Then open `http://<nas-ip>:8080/edit`, create your
+sign-in, and set everything else (time zone, accounts, sync interval, people)
+under **Settings**.
 
 The step-by-step guide, including how to find your user ID and how to put the
 board on a Fire TV, Raspberry Pi or iPad, is in
@@ -62,12 +63,12 @@ environment.
 
 ## Pages
 
-| URL         | What it's for                                                                                             |
-| ----------- | --------------------------------------------------------------------------------------------------------- |
-| `/`         | The wall display. Read-only, no login. `/?board=<id>` shows another board.                                |
-| `/edit`     | Arrange widgets: drag the ⠿ pill to move, drag edges to resize, ⚙︎ for board settings.                     |
-| `/calendar` | Full calendar: drag to move, stretch to resize, select a time range to create, click to edit or delete.   |
-| `/settings` | Your account and two-step sign-in, people, calendars, the reminders Shortcut, photos, checklists, verses. |
+| URL         | What it's for                                                                                                    |
+| ----------- | ---------------------------------------------------------------------------------------------------------------- |
+| `/`         | The wall display. Read-only, no login. `/?board=<id>` shows another board.                                       |
+| `/edit`     | Arrange widgets: drag the ⠿ pill to move, drag edges to resize, ⚙︎ for board settings.                            |
+| `/calendar` | Full calendar: drag to move, stretch to resize, select a time range to create, click to edit or delete.          |
+| `/settings` | Your account and two-step sign-in, people, time zone and sync, calendars, reminders, photos, checklists, verses. |
 
 Anyone on your network can look at a board: TVs don't sign in. Changing
 anything needs a sign-in.
@@ -121,21 +122,35 @@ out once by the upgrade. TVs showing the board aren't affected.
 
 ## Configuration
 
-All settings are environment variables. The defaults suit the Docker image.
+Accounts and settings live in the web app under **Settings**, not in Docker:
 
-| Variable                     | Default         | Meaning                                                                                                                                           |
-| ---------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `TZ`                         | `UTC`           | Your time zone, e.g. `America/Chicago`. Decides "today" and all-day events.                                                                       |
-| `PUID` / `PGID`              | `1000` / `1000` | User and group the server runs as (Synology: usually `1026` / `100`).                                                                             |
-| `PORT`                       | `8080`          | HTTP port.                                                                                                                                        |
-| `HEARTHBOARD_DATA`           | `/data`         | Database, encryption key and image cache.                                                                                                         |
-| `HEARTHBOARD_PHOTOS`         | `/photos`       | Photo folder (mount it read-only).                                                                                                                |
-| `HEARTHBOARD_SYNC_INTERVAL`  | `60`            | Seconds between calendar syncs (minimum 15).                                                                                                      |
-| `HEARTHBOARD_ADMIN_PASSWORD` | (none)          | On first start, create an `admin` user with this password instead of setup on first visit. `HEARTHBOARD_PIN` is the older name and still works.   |
-| `HEARTHBOARD_RESET_ADMIN`    | (off)           | `1` resets the `admin` user to `HEARTHBOARD_ADMIN_PASSWORD` with two-step sign-in off, on every start. For getting back in; remove it afterwards. |
-| `HEARTHBOARD_SECRET`         | (generated)     | Key for encrypting stored credentials. By default one is generated in `/data/secret.key`.                                                         |
-| `HEARTHBOARD_PUBLIC_URL`     | (none)          | HTTPS address of the board, if you have one. Lets Google sign-in redirect back directly.                                                          |
-| `HEARTHBOARD_DEMO`           | (off)           | `1` loads sample calendars, reminders and photos.                                                                                                 |
+- **My account:** your password, two-step sign-in, signing out.
+- **People** (admins): add, change and remove people; require two-step
+  sign-in.
+- **General** (admins): time zone, how often calendars sync, and the public
+  HTTPS address used for Google sign-in.
+- **Calendars, Apple Reminders, Photos** (admins): every account sign-in.
+
+They're stored in `/data` and survive container updates. The time zone
+starts as the one of the device you created the first account on.
+
+Docker only needs what the container itself requires:
+
+| Variable                     | Default         | Meaning                                                                                                                                              |
+| ---------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PUID` / `PGID`              | `1000` / `1000` | User and group the server runs as (Synology: usually `1026` / `100`).                                                                                |
+| `PORT`                       | `8080`          | HTTP port.                                                                                                                                           |
+| `HEARTHBOARD_DATA`           | `/data`         | Database, encryption key and image cache.                                                                                                            |
+| `HEARTHBOARD_PHOTOS`         | `/photos`       | Photo folder (mount it read-only).                                                                                                                   |
+| `HEARTHBOARD_SECRET`         | (generated)     | Key for encrypting stored credentials. By default one is generated in `/data/secret.key`.                                                            |
+| `HEARTHBOARD_DEMO`           | (off)           | `1` loads sample calendars, reminders and photos.                                                                                                    |
+| `HEARTHBOARD_ADMIN_PASSWORD` | (none)          | Optional. On first start, create an `admin` user with this password instead of setting one up on first visit. Ignored once anyone has signed up.     |
+| `HEARTHBOARD_RESET_ADMIN`    | (off)           | Recovery only: `1` resets the `admin` user to `HEARTHBOARD_ADMIN_PASSWORD` with two-step sign-in off, on every start. Remove it once you're back in. |
+
+Older compose files that still set `TZ`, `HEARTHBOARD_SYNC_INTERVAL` or
+`HEARTHBOARD_PUBLIC_URL` keep working: those values are used only until you
+change the setting in the web app, and can be removed. `HEARTHBOARD_PIN` works
+like `HEARTHBOARD_ADMIN_PASSWORD`.
 
 ## Themes and text sizes
 
@@ -230,3 +245,9 @@ Repository layout: `shared/` (types and schemas used by both sides),
 ## License
 
 [MIT](LICENSE)
+
+## Scripture copyright
+
+Scripture quotations are from the ESV® Bible (The Holy Bible, English Standard
+Version®), © 2001 by Crossway, a publishing ministry of Good News Publishers.
+Used by permission. All rights reserved.

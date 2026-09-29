@@ -7,10 +7,23 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
 } from 'react';
-import { MIN_PASSWORD_LENGTH, type AuthStatus, type UserDTO } from '@hearthboard/shared';
+import {
+  MIN_PASSWORD_LENGTH,
+  type AuthStatus,
+  type SystemSettingsDTO,
+  type UserDTO,
+} from '@hearthboard/shared';
 import { api } from '../api';
 import { useAction } from './Card';
 import { CodeInput, TotpEnroll } from './TwoStep';
+
+/** On first setup, start from this device's time zone instead of the image's UTC default. */
+async function adoptDeviceTimeZone() {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const current = await api.get<SystemSettingsDTO>('/api/system');
+  if (zone && current.timeZone === 'UTC' && zone !== 'UTC')
+    await api.put('/api/system', { timeZone: zone });
+}
 
 const SIGNED_OUT: AuthStatus = {
   setupNeeded: false,
@@ -91,7 +104,12 @@ function Setup({ onDone }: { onDone: () => void }) {
           e.preventDefault();
           if (form.password !== form.confirm) return setError('The passwords do not match.');
           const { name, username, password } = form;
-          if (await run(() => api.post('/api/auth/setup', { name, username, password }))) onDone();
+          const created = await run(() =>
+            api.post('/api/auth/setup', { name, username, password }),
+          );
+          if (!created) return;
+          await adoptDeviceTimeZone().catch(() => {});
+          onDone();
         }}
       >
         <Field
