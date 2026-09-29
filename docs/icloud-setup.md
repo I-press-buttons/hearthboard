@@ -47,7 +47,15 @@ iCloud already appear under your account.
   months ahead.
 - **Other CalDAV calendars** (Synology Calendar, Nextcloud, Fastmail) work the
   same way through **Add other CalDAV**. Synology Calendar shows its CalDAV
-  address under Synology Calendar → Settings → CalDAV Account.
+  address under Synology Calendar → Settings → CalDAV Account. Use its
+  `https://` address when it has one, so your password is encrypted.
+- **If the password stops working:** Hearthboard stops syncing that account
+  instead of trying the wrong password over and over, which could get your
+  Apple ID locked. The account shows **paused** under Settings → Calendars. If
+  the password changed, remove the account and add it again with a new
+  app-specific password; otherwise press **Sync now** to try once more. Other
+  problems (for example the server being down) are retried automatically, a
+  little less often each time, and the account shows when the next try is.
 
 To disconnect, remove the account in Settings and revoke the app-specific
 password at account.apple.com.

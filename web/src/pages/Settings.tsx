@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { AccountDTO, CalendarDTO, ChecklistDTO, SystemSettingsDTO } from '@hearthboard/shared';
 import { api } from '../api';
 import { useMe } from '../components/Auth';
@@ -162,6 +162,17 @@ function GeneralCard() {
 
 // ---------------- calendars ----------------
 
+/** Shown under a server address that starts with http://, where the password isn't encrypted. */
+function PlainHttpWarning({ url, children }: { url: string; children: ReactNode }) {
+  if (!/^\s*http:\/\//i.test(url)) return null;
+  return (
+    <div className="error-text" role="alert">
+      This address starts with <code>http://</code>, so your password would cross the network
+      unencrypted. {children}
+    </div>
+  );
+}
+
 function CalDavDialog({ preset, onClose }: { preset: 'icloud' | 'custom'; onClose: () => void }) {
   const [form, setForm] = useState({
     name: preset === 'icloud' ? 'iCloud' : 'CalDAV',
@@ -206,6 +217,9 @@ function CalDavDialog({ preset, onClose }: { preset: 'icloud' | 'custom'; onClos
                 onChange={(e) => set({ serverUrl: e.target.value })}
               />
             </label>
+            <PlainHttpWarning url={form.serverUrl}>
+              Use the <code>https://</code> address if your server has one.
+            </PlainHttpWarning>
           </>
         )}
         <label className="field">
@@ -690,7 +704,8 @@ function PhotosCard() {
       <p className="hint">
         Optional: to show a specific album, sign in to the Synology Photos API with a DSM account
         that has no 2-factor sign-in (a separate read-only “wallboard” user is best; share the
-        albums with it).
+        albums with it). Use DSM's secure address (<code>https://</code>, usually port 5001) so the
+        password is encrypted on its way to your NAS.
       </p>
       <form
         onSubmit={async (e) => {
@@ -713,12 +728,16 @@ function PhotosCard() {
             <input
               type="url"
               required
-              placeholder="http://192.168.1.10:5000"
+              placeholder="https://192.168.1.10:5001"
               value={form.url}
               onChange={(e) => setForm({ ...form, url: e.target.value })}
             />
           </label>
         </div>
+        <PlainHttpWarning url={form.url}>
+          Use <code>https://&lt;nas&gt;:5001</code> instead, and tick “Allow self-signed HTTPS
+          certificate” below if DSM uses its own certificate.
+        </PlainHttpWarning>
         <div className="row">
           <label className="field grow">
             <span>Username</span>
