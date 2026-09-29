@@ -22,7 +22,7 @@ import { Reminders } from './reminders';
 import { SecretBox } from './secrets';
 import { applyTimeZone, SystemSettings } from './system';
 import { Users } from './users';
-import { HttpError } from './util';
+import { errorMessage, HttpError } from './util';
 import { Weather } from './weather';
 
 export interface AppContext {
@@ -113,7 +113,7 @@ export async function buildApp(config: Config, opts: BuildOptions = {}): Promise
     const status = (err as { statusCode?: number }).statusCode;
     if (status && status < 500) return reply.code(status).send({ error: (err as Error).message });
     req.log.error(err);
-    return reply.code(502).send({ error: (err as Error).message || 'Something went wrong' });
+    return reply.code(502).send({ error: errorMessage(err) || 'Something went wrong' });
   });
 
   app.get('/api/health', async () => ({ ok: true, demo: config.demo }));

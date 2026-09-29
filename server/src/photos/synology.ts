@@ -1,4 +1,5 @@
 import { Agent } from 'undici';
+import { requestTimeout } from '../util';
 
 export interface SynologySecret {
   /** e.g. http://192.168.1.10:5000 or https://nas.local:5001 */
@@ -55,7 +56,7 @@ export class SynologyPhotos {
   }
 
   private async raw(params: Record<string, string>): Promise<Response> {
-    const init: RequestInit & { dispatcher?: Agent } = {};
+    const init: RequestInit & { dispatcher?: Agent } = { signal: requestTimeout() };
     if (this.dispatcher) init.dispatcher = this.dispatcher;
     return this.f(this.endpoint(params), init);
   }
