@@ -42,6 +42,8 @@ interface Props {
   view: 'dayGridMonth' | 'timeGridWeek' | 'timeGridDay' | 'listWeek';
   calendarIds?: string[];
   editable?: boolean;
+  /** Drag over empty time to start a new event. Defaults to `editable`. */
+  selectable?: boolean;
   showWeekends?: boolean;
   toolbar?: ToolbarInput | false;
   /** Jump to this date whenever it changes (e.g. after adding an event). */
@@ -56,6 +58,7 @@ export function CalendarView({
   view,
   calendarIds = [],
   editable,
+  selectable = editable,
   showWeekends = true,
   toolbar,
   focusDate,
@@ -135,7 +138,7 @@ export function CalendarView({
         scrollTime="07:00:00"
         eventTimeFormat={{ hour: 'numeric', minute: '2-digit', meridiem: 'short' }}
         editable={!!editable}
-        selectable={!!editable}
+        selectable={!!selectable}
         selectMirror
         longPressDelay={350}
         eventDurationEditable={!!editable}

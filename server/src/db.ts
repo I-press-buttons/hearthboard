@@ -156,6 +156,12 @@ export const MIGRATIONS: (string | ((db: DB) => void))[] = [
   CREATE INDEX checklist_items_list ON checklist_items(checklist_id, position);
   CREATE INDEX boards_owner ON boards(owner_id);
   `,
+
+  // Whether family members (not just admins) may add and change events on a calendar. Off for
+  // every calendar, so connecting someone's personal or work account never opens it to the family.
+  `
+  ALTER TABLE calendars ADD COLUMN members_can_edit INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export function openDb(file: string): DB {

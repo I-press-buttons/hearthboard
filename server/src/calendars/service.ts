@@ -7,6 +7,7 @@ import type {
   EventInput,
   EventPatch,
   ProviderKind,
+  Role,
 } from '@hearthboard/shared';
 import type { DB } from '../db';
 import type { LiveHub } from '../live';
@@ -45,6 +46,7 @@ interface CalendarRow {
   color: string | null;
   enabled: number;
   writable: number;
+  members_can_edit: number;
   cursor: string | null;
 }
 
@@ -70,6 +72,18 @@ const PALETTE = [
 ];
 const DAY = 86_400_000;
 const CALENDAR_LIST_REFRESH_MS = 15 * 60_000;
+
+/** Whoever is asking: a signed-in person, or null (a wall display that isn't signed in). */
+export type Viewer = { role: Role } | null;
+
+/**
+ * Admins can change any writable calendar; members only the ones an admin has opened to the
+ * family. Someone who isn't signed in can't change anything.
+ */
+function mayEdit(cal: Pick<CalendarRow, 'writable' | 'members_can_edit'>, viewer: Viewer) {
+  if (!cal.writable || !viewer) return false;
+  return viewer.role === 'admin' || !!cal.members_can_edit;
+}
 
 export type ProviderFactory = (provider: ProviderKind, secret: unknown) => CalendarProvider;
 
@@ -122,7 +136,8 @@ export class CalendarService {
     );
   }
 
-  listCalendars(): CalendarDTO[] {
+  /** The calendars, with what `viewer` may change on each. */
+  listCalendars(viewer: Viewer): CalendarDTO[] {
     const rows = this.db
       .prepare(
         `SELECT c.*, a.provider FROM calendars c JOIN accounts a ON a.id = c.account_id ORDER BY a.rowid, c.rowid`,
@@ -136,6 +151,8 @@ export class CalendarService {
       color: c.color ?? PALETTE[0],
       enabled: !!c.enabled,
       writable: !!c.writable,
+      membersCanEdit: !!c.members_can_edit,
+      editable: mayEdit(c, viewer),
     }));
   }
 
@@ -168,16 +185,26 @@ export class CalendarService {
     this.live.publish('events');
   }
 
-  updateCalendar(id: string, patch: { enabled?: boolean; color?: string; name?: string }) {
+  updateCalendar(
+    id: string,
+    patch: { enabled?: boolean; color?: string; name?: string; membersCanEdit?: boolean },
+  ) {
     const cur = this.db.prepare('SELECT * FROM calendars WHERE id = ?').get(id) as
       CalendarRow | undefined;
     if (!cur) throw new HttpError(404, 'No such calendar');
+    // Nobody can change a read-only calendar, so there is nothing to open up to the family. This
+    // also stops a calendar that later becomes writable from being open by surprise.
+    if (patch.membersCanEdit && !cur.writable)
+      throw new HttpError(400, 'That calendar is read-only, so nobody can change its events.');
     this.db
-      .prepare('UPDATE calendars SET enabled = ?, color = ?, name = ? WHERE id = ?')
+      .prepare(
+        'UPDATE calendars SET enabled = ?, color = ?, name = ?, members_can_edit = ? WHERE id = ?',
+      )
       .run(
         patch.enabled === undefined ? cur.enabled : patch.enabled ? 1 : 0,
         patch.color ?? cur.color,
         patch.name ?? cur.name,
+        patch.membersCanEdit === undefined ? cur.members_can_edit : patch.membersCanEdit ? 1 : 0,
         id,
       );
     this.live.publish('calendars');
@@ -387,8 +414,8 @@ export class CalendarService {
     return occ;
   }
 
-  events(from: Date, to: Date, calendarIds?: string[]): EventDTO[] {
-    const cals = this.listCalendars().filter(
+  events(from: Date, to: Date, calendarIds: string[] | undefined, viewer: Viewer): EventDTO[] {
+    const cals = this.listCalendars(viewer).filter(
       (c) => c.enabled && (!calendarIds?.length || calendarIds.includes(c.id)),
     );
     const out: EventDTO[] = [];
@@ -414,7 +441,7 @@ export class CalendarService {
             description: o.description,
             recurring: o.recurring,
             color: cal.color,
-            editable: cal.writable,
+            editable: cal.editable,
           });
         }
       }
@@ -424,11 +451,14 @@ export class CalendarService {
 
   // ---------- writing ----------
 
-  private calendarRow(id: string): CalendarRow {
+  /** A calendar `viewer` is allowed to write to; throws otherwise. */
+  private calendarRow(id: string, viewer: Viewer): CalendarRow {
     const cal = this.db.prepare('SELECT * FROM calendars WHERE id = ?').get(id) as
       CalendarRow | undefined;
     if (!cal) throw new HttpError(404, 'No such calendar');
     if (!cal.writable) throw new HttpError(403, 'That calendar is read-only.');
+    if (!mayEdit(cal, viewer))
+      throw new HttpError(403, 'Only an admin can change events on this calendar.');
     return cal;
   }
 
@@ -439,8 +469,8 @@ export class CalendarService {
     return r;
   }
 
-  async createEvent(input: EventInput): Promise<string> {
-    const cal = this.calendarRow(input.calendarId);
+  async createEvent(input: EventInput, viewer: Viewer): Promise<string> {
+    const cal = this.calendarRow(input.calendarId, viewer);
     const res = await this.provider(cal.account_id).create(
       { remoteId: cal.remote_id, cursor: cal.cursor },
       input,
@@ -452,10 +482,12 @@ export class CalendarService {
 
   private async write(
     resourceId: string,
+    viewer: Viewer,
     op: (p: CalendarProvider, cal: CalendarRow, r: RemoteResource) => Promise<WriteResult>,
   ) {
     const r = this.resourceRow(resourceId);
-    const cal = this.calendarRow(r.calendar_id);
+    // Judge by the calendar the event is stored in, never one named by the client.
+    const cal = this.calendarRow(r.calendar_id, viewer);
     const p = this.provider(cal.account_id);
     let result: WriteResult;
     try {
@@ -479,14 +511,14 @@ export class CalendarService {
     this.live.publish('events');
   }
 
-  updateEvent(resourceId: string, patch: EventPatch) {
-    return this.write(resourceId, (p, cal, r) =>
+  updateEvent(resourceId: string, patch: EventPatch, viewer: Viewer) {
+    return this.write(resourceId, viewer, (p, cal, r) =>
       p.update({ remoteId: cal.remote_id, cursor: cal.cursor }, r, patch),
     );
   }
 
-  deleteEvent(resourceId: string, del: EventDelete) {
-    return this.write(resourceId, (p, cal, r) =>
+  deleteEvent(resourceId: string, del: EventDelete, viewer: Viewer) {
+    return this.write(resourceId, viewer, (p, cal, r) =>
       p.remove({ remoteId: cal.remote_id, cursor: cal.cursor }, r, del),
     );
   }

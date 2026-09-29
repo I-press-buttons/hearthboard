@@ -20,6 +20,13 @@ export interface CalendarDTO {
   color: string;
   enabled: boolean;
   writable: boolean;
+  /** An admin has let family members (not just admins) add and change events here. */
+  membersCanEdit: boolean;
+  /**
+   * Whether the person asking may add and change events here: an admin on any writable
+   * calendar, a member only where `membersCanEdit` is on. Never true when not signed in.
+   */
+  editable: boolean;
 }
 
 /**
@@ -41,6 +48,7 @@ export interface EventDTO {
   description: string | null;
   recurring: boolean;
   color: string;
+  /** Whether the person asking may change or delete this event (see `CalendarDTO.editable`). */
   editable: boolean;
 }
 
