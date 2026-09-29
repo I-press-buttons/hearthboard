@@ -299,16 +299,42 @@ describe('pairing with a code', () => {
 
   it('only lets so many screens wait at once, and frees the room as codes run out', async () => {
     app = await testApp();
+    const pair = (from: string) =>
+      app!.app.inject({ method: 'POST', url: '/api/displays/pair', remoteAddress: from });
     const codes = new Set<string>();
-    for (let i = 0; i < 20; i++) codes.add((await unpairedTv(app)).code);
+    for (let i = 0; i < 20; i++) codes.add((await pair(`10.0.0.${i}`)).json().code);
     expect(codes.size).toBe(20);
-    const full = await app.client().inject('POST', '/api/displays/pair');
-    expect(full.status).toBe(429);
-    expect(full.body.error).toMatch(/Too many screens/);
+    const full = await pair('10.0.0.99');
+    expect(full.statusCode).toBe(429);
+    expect(full.json().error).toMatch(/Too many screens/);
 
     app.db.prepare('UPDATE displays SET expires_at = ?').run(Date.now() - 1);
     expect((await app.client().inject('POST', '/api/displays/pair')).status).toBe(200);
     expect((app.db.prepare('SELECT COUNT(*) AS n FROM displays').get() as { n: number }).n).toBe(1);
+  });
+
+  it("doesn't let one device take every waiting place", async () => {
+    app = await testApp();
+    const pair = (from: string) =>
+      app!.app.inject({ method: 'POST', url: '/api/displays/pair', remoteAddress: from });
+    // No cookie kept, so each request is a "new screen": it only replaces its own codes.
+    const codes: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      const res = await pair('192.168.1.66');
+      expect(res.statusCode).toBe(200);
+      codes.push(res.json().code);
+    }
+    const waiting = app.db
+      .prepare('SELECT COUNT(*) AS n FROM displays WHERE approved = 0')
+      .get() as { n: number };
+    expect(waiting.n).toBe(3);
+    // Its latest code still works, and the kitchen TV can still get one.
+    const approve = (code: string) =>
+      app!.inject('POST', '/api/displays/approve', { code, name: 'TV' });
+    await app.login();
+    expect((await approve(codes[0])).status).toBe(404);
+    expect((await approve(codes[49])).status).toBe(200);
+    expect((await pair('192.168.1.20')).statusCode).toBe(200);
   });
 
   it('is for admins to approve', async () => {

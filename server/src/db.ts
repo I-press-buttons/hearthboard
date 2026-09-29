@@ -176,7 +176,9 @@ export const MIGRATIONS: (string | ((db: DB) => void))[] = [
     last_seen INTEGER NOT NULL,
     approved INTEGER NOT NULL DEFAULT 0,
     code TEXT UNIQUE,
-    expires_at INTEGER
+    expires_at INTEGER,
+    -- The address that asked for a code, so one device can't take every waiting place.
+    requested_by TEXT
   );
   `,
 ];

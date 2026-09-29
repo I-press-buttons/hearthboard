@@ -52,6 +52,8 @@ const CODE_TTL_MS = 10 * 60_000;
 const LINK_TTL_MS = 24 * 3600_000;
 /** Screens waiting to be approved at once, so the list can't be flooded. */
 const MAX_PENDING = 20;
+/** Codes one address may have waiting; asking for another replaces its oldest. */
+const MAX_PENDING_PER_ADDRESS = 3;
 
 const newCode = () =>
   Array.from(
@@ -181,6 +183,16 @@ export class Displays {
       if (waiting) return { code: formatPairCode(waiting.code!), expiresAt: waiting.expires_at! };
       if (this.current(req)) throw new HttpError(409, 'This screen is already paired.');
 
+      // One device (say, a script on the network) can't fill every place: it only ever
+      // replaces its own oldest codes. A screen that lost its cookie still gets a new one.
+      const mine = this.db
+        .prepare(
+          'SELECT id FROM displays WHERE approved = 0 AND requested_by = ? ORDER BY created_at DESC, rowid DESC',
+        )
+        .all(req.ip) as { id: string }[];
+      for (const { id } of mine.slice(MAX_PENDING_PER_ADDRESS - 1))
+        this.db.prepare('DELETE FROM displays WHERE id = ?').run(id);
+
       const { n } = this.db
         .prepare('SELECT COUNT(*) AS n FROM displays WHERE approved = 0')
         .get() as { n: number };
@@ -193,10 +205,18 @@ export class Displays {
       const expiresAt = now + CODE_TTL_MS;
       this.db
         .prepare(
-          `INSERT INTO displays (id, name, token_hash, created_at, last_seen, approved, code, expires_at)
-           VALUES (?, '', ?, ?, ?, 0, ?, ?)`,
+          `INSERT INTO displays (id, name, token_hash, created_at, last_seen, approved, code, expires_at, requested_by)
+           VALUES (?, '', ?, ?, ?, 0, ?, ?, ?)`,
         )
-        .run(crypto.randomBytes(8).toString('hex'), hashToken(token), now, now, code, expiresAt);
+        .run(
+          crypto.randomBytes(8).toString('hex'),
+          hashToken(token),
+          now,
+          now,
+          code,
+          expiresAt,
+          req.ip,
+        );
       this.setCookie(reply, token);
       return { code: formatPairCode(code), expiresAt };
     });
