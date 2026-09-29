@@ -18,7 +18,8 @@ import type { CalendarService } from './service';
 const CalDavBody = z.object({
   name: z.string().min(1).max(100).default('iCloud'),
   preset: z.enum(['icloud', 'custom']).default('icloud'),
-  serverUrl: httpUrl().optional(),
+  // The dialog sends the field empty for iCloud, which has its own address.
+  serverUrl: z.preprocess((v) => (v === '' ? undefined : v), httpUrl().optional()),
   username: z.string().min(1),
   password: z.string().min(1),
 });
