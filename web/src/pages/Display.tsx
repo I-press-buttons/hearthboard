@@ -1,9 +1,15 @@
-import { useEffect, useState } from 'react';
-import { inTimeWindow, scheduledBoardId, type Board } from '@hearthboard/shared';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  inTimeWindow,
+  scheduledBoardId,
+  type Board,
+  type DisplayStatus,
+} from '@hearthboard/shared';
 import { api, setDisplayBoard } from '../api';
 import { BoardCanvas } from '../board/BoardCanvas';
 import { useLive, useLiveQuery, useLiveStatus } from '../live';
 import { WidgetView } from '../widgets/registry';
+import { PairScreen } from './Pair';
 
 const SHIFTS = [
   { x: 0, y: 0 },
@@ -77,8 +83,51 @@ function FullscreenButton() {
   );
 }
 
-/** The wall display: full screen, read-only (unless it's a touch-screen board), updates itself. */
+/**
+ * Whether this device may show boards: signed in, paired, or the household lets any device.
+ * Looks again whenever a request is refused, e.g. after the screen is removed in Settings.
+ */
+function useDisplayAccess() {
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const check = useCallback(() => {
+    api.get<DisplayStatus>('/api/displays/me').then(
+      (s) => {
+        setAllowed(s.allowed);
+        setError(null);
+      },
+      (e: Error) => setError(e.message),
+    );
+  }, []);
+  useEffect(() => {
+    check();
+    window.addEventListener('hb:unauthorized', check);
+    return () => window.removeEventListener('hb:unauthorized', check);
+  }, [check]);
+  // Can't reach the server (it may be restarting): keep what we showed and try again.
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(check, 5000);
+    return () => clearTimeout(t);
+  }, [error, check]);
+  return { allowed, error, check };
+}
+
+/** The wall display: the board, or a code to pair this screen if it isn't allowed to show one. */
 export function Display() {
+  const { allowed, error, check } = useDisplayAccess();
+  if (allowed === null) {
+    return (
+      <div className="widget-empty" style={{ height: '100%' }}>
+        {error ? `Can't reach Hearthboard: ${error}` : 'Loading…'}
+      </div>
+    );
+  }
+  return allowed ? <BoardDisplay /> : <PairScreen onPaired={check} />;
+}
+
+/** The board: full screen, read-only (unless it's a touch-screen board), updates itself. */
+function BoardDisplay() {
   const homeId = new URLSearchParams(location.search).get('board') || 'main';
   const { data: home, error } = useLiveQuery(
     ['board'],

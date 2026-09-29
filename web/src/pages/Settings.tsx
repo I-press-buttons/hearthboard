@@ -5,6 +5,7 @@ import { useMe } from '../components/Auth';
 import { Card, useAction } from '../components/Card';
 import { Modal, TopBar } from '../components/TopBar';
 import { AccountCard } from './settings/Account';
+import { DisplaysCard } from './settings/Displays';
 import { PeopleCard } from './settings/People';
 import { useLiveQuery } from '../live';
 
@@ -957,6 +958,7 @@ export function Settings() {
         <div className="page-inner">
           <AccountCard />
           {admin && <PeopleCard />}
+          {admin && <DisplaysCard />}
           {admin && <GeneralCard />}
           {admin && <CalendarsCard />}
           {admin && <RemindersCard />}
