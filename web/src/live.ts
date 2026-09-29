@@ -3,6 +3,9 @@ import type { LiveMessage, LiveTopic } from '@hearthboard/shared';
 
 type Listener = (msg: LiveMessage) => void;
 
+/** WebSocket close code the server uses for "you're not allowed here any more". */
+const CLOSE_POLICY = 1008;
+
 /** Single reconnecting WebSocket shared by the whole page. */
 class LiveClient {
   private ws: WebSocket | null = null;
@@ -31,11 +34,25 @@ class LiveClient {
         /* ignore */
       }
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       this.ws = null;
       this.setConnected(false);
+      // The server closes with 1008 when this screen isn't allowed any more (it was removed, or
+      // the household stopped allowing any device). Knocking again would only be refused, so
+      // stop; the page shows its pairing view, and starts a new connection once it's paired.
+      if (ev.code === CLOSE_POLICY) {
+        this.retry = 0;
+        window.dispatchEvent(new Event('hb:unauthorized'));
+        return;
+      }
+      // A refused connection never opens, so it never counts as "reconnected": no reload, just
+      // slower and slower attempts.
       const delay = Math.min(30_000, 1000 * 2 ** this.retry++);
-      setTimeout(() => this.start(), delay);
+      setTimeout(() => {
+        // Nobody is listening (the pairing view is up): wait until someone is.
+        if (!this.listeners.size) this.retry = 0;
+        else this.start();
+      }, delay);
     };
   }
 

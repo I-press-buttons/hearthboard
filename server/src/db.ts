@@ -150,6 +150,37 @@ export const MIGRATIONS: (string | ((db: DB) => void))[] = [
     expires_at INTEGER
   );
   `,
+
+  // Indexes for the lookups every display refresh and board list makes.
+  `
+  CREATE INDEX checklist_items_list ON checklist_items(checklist_id, position);
+  CREATE INDEX boards_owner ON boards(owner_id);
+  `,
+
+  // Whether family members (not just admins) may add and change events on a calendar. Off for
+  // every calendar, so connecting someone's personal or work account never opens it to the family.
+  `
+  ALTER TABLE calendars ADD COLUMN members_can_edit INTEGER NOT NULL DEFAULT 0;
+  `,
+
+  // Paired screens. A screen waiting for approval is a row with a code (approved = 0); one made
+  // with a pairing link has a claim_hash instead until the link is opened. Tokens are stored
+  // hashed, like sessions.
+  `
+  CREATE TABLE displays (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT UNIQUE,
+    claim_hash TEXT UNIQUE,
+    created_at INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    approved INTEGER NOT NULL DEFAULT 0,
+    code TEXT UNIQUE,
+    expires_at INTEGER,
+    -- The address that asked for a code, so one device can't take every waiting place.
+    requested_by TEXT
+  );
+  `,
 ];
 
 export function openDb(file: string): DB {

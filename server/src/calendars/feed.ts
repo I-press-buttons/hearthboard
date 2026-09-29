@@ -24,6 +24,26 @@ export interface FeedSecret {
 /** Feeds rarely change; download at most this often (the Sync now button always downloads). */
 export const FEED_REFRESH_MS = 15 * 60_000;
 const MAX_BYTES = 20 * 1024 * 1024;
+const TOO_LARGE = 'That calendar feed is too large.';
+
+/** The body as text, stopping as soon as it passes `max` bytes instead of buffering it all. */
+async function readText(res: Response, max: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return '';
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      throw new Error(TOO_LARGE);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
 const REMOTE_ID = 'feed';
 const PRODID = '-//Hearthboard//Calendar feed//EN';
 const NOT_A_CALENDAR = "That address didn't return a calendar (.ics) file.";
@@ -158,6 +178,8 @@ const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
 export class IcsFeedProvider implements CalendarProvider {
   private last: Download | null = null;
+  /** Name and color of the last download, by its hash. */
+  private info: { hash: string; name: string | null; color: string | null } | null = null;
   private readonly url: string;
 
   constructor(
@@ -194,9 +216,8 @@ export class IcsFeedProvider implements CalendarProvider {
       throw new Error(`The calendar feed isn't available (HTTP ${res.status}). Check the address.`);
     if (!res.ok) throw new Error(`Couldn't download the calendar feed: HTTP ${res.status}`);
     const length = Number(res.headers.get('content-length'));
-    if (length > MAX_BYTES) throw new Error('That calendar feed is too large.');
-    const body = await res.text();
-    if (body.length > MAX_BYTES) throw new Error('That calendar feed is too large.');
+    if (length > MAX_BYTES) throw new Error(TOO_LARGE);
+    const body = await readText(res, MAX_BYTES);
     if (!/BEGIN:VCALENDAR/i.test(body)) throw new Error(NOT_A_CALENDAR);
     this.last = {
       at: Date.now(),
@@ -209,15 +230,21 @@ export class IcsFeedProvider implements CalendarProvider {
   }
 
   async listCalendars(): Promise<RemoteCalendar[]> {
-    // Reuse a download from the last minute (adding an account lists, then syncs).
+    // Reuse a download from the last minute (adding an account lists, then syncs); otherwise
+    // ask with If-None-Match, so an unchanged feed isn't downloaded and parsed all over again.
     const d =
-      this.last && Date.now() - this.last.at < 60_000 ? this.last : await this.download(false);
-    const parsed = splitFeed(d!.body);
+      this.last && Date.now() - this.last.at < 60_000
+        ? this.last
+        : ((await this.download(true)) ?? this.last);
+    if (this.info?.hash !== d!.hash) {
+      const { name, color } = splitFeed(d!.body);
+      this.info = { hash: d!.hash, name, color };
+    }
     return [
       {
         remoteId: REMOTE_ID,
-        name: parsed.name ?? new URL(this.url).hostname,
-        color: parsed.color,
+        name: this.info.name ?? new URL(this.url).hostname,
+        color: this.info.color,
         writable: false,
       },
     ];

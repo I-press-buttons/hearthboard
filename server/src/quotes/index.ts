@@ -5,6 +5,7 @@ import type { QuoteDTO } from '@hearthboard/shared';
 import type { DB } from '../db';
 import type { LiveHub } from '../live';
 import type { Auth } from '../auth';
+import type { DisplayGuard } from '../displays';
 import verses from './data/verses-esv.json' with { type: 'json' };
 import quotes from './data/quotes.json' with { type: 'json' };
 
@@ -71,9 +72,10 @@ export class Quotes {
       : { kind, ...pick(QUOTES, period, 'quote') };
   }
 
-  register(app: FastifyInstance, auth: Auth) {
+  register(app: FastifyInstance, auth: Auth, display: DisplayGuard) {
     app.get<{ Querystring: { mode?: QuoteMode; rotate?: 'daily' | 'hourly' } }>(
       '/api/quote',
+      { preHandler: display },
       async (req) => {
         const mode = (['verse', 'quote', 'both', 'custom'] as const).includes(
           req.query.mode as QuoteMode,
@@ -84,7 +86,7 @@ export class Quotes {
       },
     );
 
-    app.get('/api/quotes/custom', async () => this.custom());
+    app.get('/api/quotes/custom', { preHandler: display }, async () => this.custom());
 
     app.post('/api/quotes/custom', { preHandler: auth.guard }, async (req) => {
       const q = CustomQuote.parse(req.body);

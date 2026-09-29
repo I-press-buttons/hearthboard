@@ -1,4 +1,5 @@
 import type { EventDelete, EventInput, EventPatch } from '@hearthboard/shared';
+import { requestTimeout } from '../util';
 import type { Occurrence } from './ics';
 import {
   AuthError,
@@ -29,6 +30,11 @@ interface GTime {
   date?: string | null;
   dateTime?: string | null;
   timeZone?: string | null;
+}
+
+/** The error body of the Google Calendar API. */
+interface GoogleError {
+  error?: { message?: string; errors?: { reason: string }[] };
 }
 
 export interface GEvent {
@@ -85,6 +91,7 @@ export async function exchangeGoogleCode(
   const res = await f(TOKEN_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    signal: requestTimeout(),
     body: new URLSearchParams({
       code,
       client_id: clientId,
@@ -186,6 +193,7 @@ export class GoogleProvider implements CalendarProvider {
     const res = await this.f(TOKEN_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      signal: requestTimeout(),
       body: new URLSearchParams({
         client_id: this.secret.clientId,
         client_secret: this.secret.clientSecret,
@@ -216,10 +224,13 @@ export class GoogleProvider implements CalendarProvider {
     init: RequestInit = {},
     retry = true,
   ): Promise<{ status: number; body: T | null }> {
+    // Fetch the token first so a slow sign-in doesn't use up this request's time.
+    const token = await this.token();
     const res = await this.f(API + path, {
       ...init,
+      signal: requestTimeout(),
       headers: {
-        authorization: `Bearer ${await this.token()}`,
+        authorization: `Bearer ${token}`,
         ...(init.body ? { 'content-type': 'application/json' } : {}),
         ...(init.headers ?? {}),
       },
@@ -234,9 +245,13 @@ export class GoogleProvider implements CalendarProvider {
     const text = await res.text();
     const body = text ? (JSON.parse(text) as T) : null;
     if (!res.ok) {
-      const msg =
-        (body as { error?: { message?: string } } | null)?.error?.message ?? res.statusText;
-      if (res.status === 403 || res.status === 401) throw new AuthError(`Google: ${msg}`);
+      const error = (body as GoogleError | null)?.error;
+      const msg = error?.message ?? res.statusText;
+      // Google also answers 403 when it is only rate-limiting: that passes, so it must not
+      // count as a failed sign-in (which stops syncing until someone presses Sync now).
+      const limited = error?.errors?.some((e) => /rateLimit|quota|limitExceeded/i.test(e.reason));
+      if (res.status === 401 || (res.status === 403 && !limited))
+        throw new AuthError(`Google: ${msg}`);
       if (res.status === 404 && init.method === 'DELETE') return { status: 404, body: null };
       throw new Error(`Google Calendar API ${res.status}: ${msg}`);
     }

@@ -3,8 +3,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { EventDelete, EventInput, EventPatch } from '@hearthboard/shared';
 import type { Auth } from '../auth';
+import type { DisplayGuard } from '../displays';
 import type { SystemSettings } from '../system';
-import { HttpError } from '../util';
+import { HttpError, httpUrl } from '../util';
 import { ICLOUD_CALDAV_URL } from './caldav';
 import { normalizeFeedUrl } from './feed';
 import {
@@ -18,7 +19,8 @@ import type { CalendarService } from './service';
 const CalDavBody = z.object({
   name: z.string().min(1).max(100).default('iCloud'),
   preset: z.enum(['icloud', 'custom']).default('icloud'),
-  serverUrl: z.string().url().optional(),
+  // The dialog sends the field empty for iCloud, which has its own address.
+  serverUrl: z.preprocess((v) => (v === '' ? undefined : v), httpUrl().optional()),
   username: z.string().min(1),
   password: z.string().min(1),
 });
@@ -48,6 +50,8 @@ const CalendarPatch = z.object({
     .regex(/^#[0-9a-fA-F]{6}$/)
     .optional(),
   name: z.string().min(1).max(100).optional(),
+  /** Let family members (not just admins) add and change events on this calendar. */
+  membersCanEdit: z.boolean().optional(),
 });
 
 interface PendingGoogle {
@@ -62,6 +66,7 @@ export function registerCalendarRoutes(
   svc: CalendarService,
   auth: Auth,
   system: SystemSettings,
+  display: DisplayGuard,
 ) {
   const guard = { preHandler: auth.guard };
   // Connecting, removing and recolouring the household's calendars.
@@ -83,11 +88,12 @@ export function registerCalendarRoutes(
     });
   };
 
-  app.get('/api/calendars', async () => svc.listCalendars());
+  // For displays that aren't signed in too; `editable` tells each viewer what they may change.
+  app.get('/api/calendars', { preHandler: display }, async (req) => svc.listCalendars(req.user));
 
   app.patch<{ Params: { id: string } }>('/api/calendars/:id', admin, async (req) => {
     svc.updateCalendar(req.params.id, CalendarPatch.parse(req.body));
-    return svc.listCalendars();
+    return svc.listCalendars(req.user);
   });
 
   app.get('/api/accounts', admin, async () => svc.listAccounts());
@@ -163,12 +169,13 @@ export function registerCalendarRoutes(
   });
 
   app.post('/api/sync', admin, async () => {
-    await svc.syncAll();
+    await svc.syncAll(true);
     return svc.listAccounts();
   });
 
   app.get<{ Querystring: { start?: string; end?: string; calendars?: string } }>(
     '/api/events',
+    { preHandler: display },
     async (req) => {
       const start = new Date(req.query.start ?? Date.now());
       const end = new Date(req.query.end ?? start.getTime() + 7 * 86_400_000);
@@ -177,7 +184,7 @@ export function registerCalendarRoutes(
       if (end.getTime() - start.getTime() > 400 * 86_400_000)
         throw new HttpError(400, 'Range too large');
       const ids = req.query.calendars?.split(',').filter(Boolean);
-      return svc.events(start, end, ids);
+      return svc.events(start, end, ids, req.user);
     },
   );
 
@@ -185,16 +192,16 @@ export function registerCalendarRoutes(
     const input = EventInput.parse(req.body);
     if (Date.parse(input.end) < Date.parse(input.start))
       throw new HttpError(400, 'The event ends before it starts.');
-    return { resourceId: await svc.createEvent(input) };
+    return { resourceId: await svc.createEvent(input, req.user) };
   });
 
   app.patch<{ Params: { id: string } }>('/api/events/:id', guard, async (req) => {
-    await svc.updateEvent(req.params.id, EventPatch.parse(req.body));
+    await svc.updateEvent(req.params.id, EventPatch.parse(req.body), req.user);
     return { ok: true };
   });
 
   app.delete<{ Params: { id: string } }>('/api/events/:id', guard, async (req) => {
-    await svc.deleteEvent(req.params.id, EventDelete.parse(req.body ?? {}));
+    await svc.deleteEvent(req.params.id, EventDelete.parse(req.body ?? {}), req.user);
     return { ok: true };
   });
 }

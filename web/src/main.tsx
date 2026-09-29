@@ -6,6 +6,7 @@ import { CalendarPage } from './pages/CalendarPage';
 import { Display } from './pages/Display';
 import { Editor } from './pages/Editor';
 import { Family } from './pages/Family';
+import { PairLink } from './pages/Pair';
 import { Settings } from './pages/Settings';
 
 function App() {
@@ -35,6 +36,8 @@ function App() {
           <Settings />
         </RequireAuth>
       );
+    case '/pair':
+      return <PairLink />;
     default:
       return <Display />;
   }

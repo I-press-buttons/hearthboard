@@ -37,6 +37,24 @@ export interface IcsInput {
 const MAX_ITERATIONS = 20_000;
 const PRODID = '-//Hearthboard//Wallboard//EN';
 
+/**
+ * ical.js gives up on MONTHLY and YEARLY rules that can never match, but a finer one such as
+ * FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30 (from any subscribed feed) spins forever inside a single
+ * `next()`, freezing the server. Allow each step this many candidate times, which is still
+ * enough for an hourly rule that only matches on leap days.
+ */
+const MAX_CANDIDATES = 100_000;
+type Budgeted = ICAL.RecurIterator & { budget: number };
+const { next, check_contracting_rules: check } = ICAL.RecurIterator.prototype;
+ICAL.RecurIterator.prototype.next = function (this: Budgeted, again?: boolean) {
+  this.budget = MAX_CANDIDATES;
+  return next.call(this, again);
+};
+ICAL.RecurIterator.prototype.check_contracting_rules = function (this: Budgeted) {
+  if (--this.budget < 0) throw new Error('Recurrence rule never matches');
+  return check.call(this);
+};
+
 /** Parse an iCalendar string and register the VTIMEZONEs it carries. */
 export function parseIcs(ics: string): ICAL.Component {
   const comp = new ICAL.Component(ICAL.parse(ics));

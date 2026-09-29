@@ -10,11 +10,18 @@ import {
 import type { DB } from './db';
 import type { LiveHub } from './live';
 import type { Auth } from './auth';
+import type { DisplayGuard } from './displays';
 import type { UserRow } from './users';
 import { HttpError } from './util';
 
 const newBoardId = () => crypto.randomBytes(4).toString('hex');
 const newWidgetId = () => crypto.randomBytes(6).toString('hex');
+
+const NewBoardInput = z.object({
+  name: z.string().max(100).optional(),
+  copyFrom: z.string().max(64).optional(),
+  layout: z.unknown().optional(),
+});
 
 /** Header a display sends to say which board it's showing (for touch-screen mode). */
 export const BOARD_HEADER = 'x-hearthboard-board';
@@ -135,16 +142,20 @@ export class Boards {
     }
   }
 
-  register(app: FastifyInstance, auth: Auth) {
+  register(app: FastifyInstance, auth: Auth, display: DisplayGuard) {
     const signedIn = { preHandler: auth.guard };
 
     app.get('/api/boards', signedIn, async (req) => this.list(req.user!));
 
-    // Public, like the rest of the display: TVs show a board without signing in.
-    app.get<{ Params: { id: string } }>('/api/boards/:id', async (req, reply) => {
-      const board = this.get(req.params.id);
-      return board ?? reply.code(404).send({ error: 'No such board' });
-    });
+    // For anyone signed in and for paired screens: TVs show a board without signing in.
+    app.get<{ Params: { id: string } }>(
+      '/api/boards/:id',
+      { preHandler: display },
+      async (req, reply) => {
+        const board = this.get(req.params.id);
+        return board ?? reply.code(404).send({ error: 'No such board' });
+      },
+    );
 
     app.put<{ Params: { id: string } }>('/api/boards/:id', signedIn, async (req) => {
       this.checkAccess(req.user!, req.params.id);
@@ -153,7 +164,7 @@ export class Boards {
     });
 
     app.post('/api/boards', signedIn, async (req) => {
-      const body = (req.body ?? {}) as { name?: string; copyFrom?: string; layout?: unknown };
+      const body = NewBoardInput.parse(req.body ?? {});
       // Import an exported layout (see "Export layout" in Board settings).
       if (body.layout !== undefined) {
         let board: Board;

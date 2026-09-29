@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { MealDate, MealInput, MealSlotParam, type MealDTO } from '@hearthboard/shared';
 import type { Auth } from './auth';
+import type { DisplayGuard } from './displays';
 import type { DB } from './db';
 import type { LiveHub } from './live';
 import { localDate } from './util';
@@ -44,9 +45,8 @@ export class Meals {
     return { date, slot, text };
   }
 
-  register(app: FastifyInstance, auth: Auth) {
-    // Public, like the rest of the display.
-    app.get('/api/meals', async (req) => {
+  register(app: FastifyInstance, auth: Auth, display: DisplayGuard) {
+    app.get('/api/meals', { preHandler: display }, async (req) => {
       const q = z
         .object({
           start: MealDate.optional(),

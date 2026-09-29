@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { PlaceDTO, WeatherDTO } from '@hearthboard/shared';
 import type { Auth } from './auth';
+import type { DisplayGuard } from './displays';
 import { errorMessage, HttpError } from './util';
 
 /** Open-Meteo: free for non-commercial use, no API key. https://open-meteo.com */
@@ -178,13 +179,12 @@ export class Weather {
     }));
   }
 
-  register(app: FastifyInstance, auth: Auth) {
+  register(app: FastifyInstance, auth: Auth, display: DisplayGuard) {
     const Coords = z.object({
       lat: z.coerce.number().min(-90).max(90),
       lon: z.coerce.number().min(-180).max(180),
     });
-    // Public, like the rest of the display.
-    app.get('/api/weather', async (req) => {
+    app.get('/api/weather', { preHandler: display }, async (req) => {
       const { lat, lon } = Coords.parse(req.query);
       return this.forecast(lat, lon);
     });

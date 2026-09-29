@@ -9,6 +9,7 @@ import {
 import type { DB } from './db';
 import type { LiveHub } from './live';
 import type { Auth } from './auth';
+import type { DisplayGuard } from './displays';
 import type { TouchGate } from './boards';
 import { localDate } from './util';
 
@@ -117,8 +118,14 @@ export class Checklists {
     return () => clearInterval(t);
   }
 
-  register(app: FastifyInstance, auth: Auth, touch: TouchGate = () => false) {
+  register(
+    app: FastifyInstance,
+    auth: Auth,
+    display: DisplayGuard,
+    touch: TouchGate = () => false,
+  ) {
     const guard = { preHandler: auth.guard };
+    const shown = { preHandler: display };
     // A touch-screen board may tick (and only tick) items of a checklist it shows.
     const tickable = {
       preHandler: auth.guardOr((req) => {
@@ -137,9 +144,9 @@ export class Checklists {
       }),
     };
 
-    app.get('/api/checklists', async () => this.all());
+    app.get('/api/checklists', shown, async () => this.all());
 
-    app.get<{ Params: { id: string } }>('/api/checklists/:id', async (req, reply) => {
+    app.get<{ Params: { id: string } }>('/api/checklists/:id', shown, async (req, reply) => {
       return this.get(req.params.id) ?? reply.code(404).send({ error: 'No such checklist' });
     });
 

@@ -7,6 +7,7 @@ export * from './checklists';
 export * from './live';
 export * from './system';
 export * from './users';
+export * from './displays';
 export * from './weather';
 export * from './countdown';
 export * from './family';

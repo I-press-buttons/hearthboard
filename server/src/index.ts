@@ -2,6 +2,8 @@ import { loadConfig } from './config';
 import { dropPrivileges } from './privileges';
 
 const config = loadConfig();
+// The database holds password hashes and tokens: keep new files away from other NAS accounts.
+process.umask(0o077);
 const runningAs = dropPrivileges(config.dataDir);
 
 // Import the app only after switching user, so every file is created as that user.

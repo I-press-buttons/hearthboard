@@ -13,7 +13,8 @@ phone or PC.
   together. Anything you add, drag, resize or edit on the board is saved back
   to the calendar it belongs to, and changes made on your phone show up within
   a minute. Repeating events work the way you'd expect ("only this one" or
-  "all events").
+  "all events"). Family members can only change the calendars an admin has
+  opened up to them ([who can edit what](#who-can-change-which-calendar)).
 - **Apple Reminders**, sent by a small iPhone Shortcut (Apple doesn't let
   servers read iCloud Reminders). Tick one off on the board and the Shortcut
   completes it on your phone.
@@ -52,8 +53,9 @@ Each of these has a full section in the **[feature guide](docs/features.md)**.
    page, check the preview, and press Enter.
 7. **Undo, redo and keyboard shortcuts** in the layout editor: ↶ ↷ buttons for phones, and arrow
    keys to nudge and resize widgets (press `?` for the full list).
-8. **Touch-screen mode:** on a wall tablet, anyone can tick checklists and reminders without
-   signing in, and the screen can stay awake. Tap for a full-screen button on any display.
+8. **Touch-screen mode:** on a paired wall tablet, anyone can tick checklists and reminders
+   without signing in, and the screen can stay awake. Tap for a full-screen button on any
+   display.
 9. **Board schedules:** show a morning-routine board on school mornings, or a dinner board at
    6 PM, and switch back by themselves.
 10. **Export and import layouts:** save a board as a file to back it up or copy it to another
@@ -93,15 +95,17 @@ environment.
 
 | URL         | What it's for                                                                                                                     |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `/`         | The wall display. Read-only, no login. `/?board=<id>` shows another board.                                                        |
+| `/`         | The wall display, read-only: for paired screens and signed-in people. `/?board=<id>` shows another board.                         |
 | `/edit`     | Arrange widgets: drag the ⠿ pill to move, drag edges to resize, ⚙︎ for board settings, ↶ ↷ to undo (`?` for shortcuts).            |
 | `/calendar` | Full calendar: quick add in plain words, drag to move, stretch to resize, select a time range to create, click to edit or delete. |
 | `/family`   | Day-to-day things from your phone: post notes to the board, plan the week's meals.                                                |
 | `/settings` | Your account and two-step sign-in, people, time zone and sync, calendars, reminders, photos, checklists, verses.                  |
 
-Anyone on your network can look at a board: TVs don't sign in. Changing
-anything needs a sign-in, except ticking checklists and reminders on a board in
+Boards are private. A screen shows one only after an admin has **paired** it
+once, or when someone signed in opens it; a TV never signs in. Changing anything
+needs a sign-in, except ticking checklists and reminders on a paired board in
 [touch-screen mode](docs/features.md#8-touch-screen-mode-for-a-wall-tablet).
+See [Pairing a TV or tablet](#pairing-a-tv-or-tablet).
 
 ## People and sign-in
 
@@ -114,14 +118,25 @@ Add everyone else under **Settings → People**. Each person gets:
   Members see and edit only their own boards; admins see everyone's, can help
   arrange them, and can hand a board to someone else ("Belongs to" in Board
   settings).
-- **A role.** _Members_ can arrange their boards, edit the calendar, tick
-  reminders and manage checklists and verses. _Admins_ can also add and remove
-  people, connect calendar accounts and Synology Photos, and see the reminders
-  token.
+- **A role.** _Members_ can arrange their boards, add and change events on the
+  calendars an admin has opened to the family (see below), tick reminders and
+  manage checklists and verses. _Admins_ can also add and remove people, connect
+  calendar accounts and Synology Photos, and see the reminders token.
 
 Calendars, reminders, photos, checklists, notes and the meal plan are shared by the household. To
 give someone a board with just their calendar, pick it under the calendar
 widget's settings.
+
+### Who can change which calendar
+
+Connecting an account brings in all of its calendars, which may include your
+personal or work ones. So **family members can look at every calendar you
+show, but can't add, move, edit or delete events on any of them until an admin
+allows it.** It's off by default for every calendar. To turn it on, go to
+**Settings → Calendars** and switch on **Family can add and change events**
+next to a calendar (for example a shared "Family" calendar). Admins can always
+change any calendar that isn't read-only, and nobody can change a read-only
+calendar such as a subscribed feed.
 
 ### Two-step sign-in
 
@@ -141,6 +156,35 @@ the app's 6-digit code after the password.
   then restart it. The `admin` user gets that password with two-step sign-in
   off. Then remove `HEARTHBOARD_RESET_ADMIN` again.
 
+### Pairing a TV or tablet
+
+A screen that isn't paired shows **Pair this screen** and a short code, such as
+`K7QM-4TWX`, instead of the board. To pair it:
+
+1. On the screen, open `http://<nas-ip>:8080/`. It shows the code.
+2. On your phone or PC, go to **Settings → Displays**, type the code, give the
+   screen a name (_Kitchen TV_) and press **Pair**.
+3. The screen loads the board by itself within a few seconds, and stays paired.
+
+Codes are good for 10 minutes; the screen shows a fresh one when one runs out.
+If typing is a bother, **Pair with a link instead** makes a link you open once
+on the screen. Under **Displays** you can rename a screen or remove it, which
+turns it away at once. A paired screen keeps a cookie in its browser, so pair
+it in the browser or app that will show the board, and don't run that browser in
+private or incognito mode.
+
+Signed-in people always see boards on their own devices, paired or not. If you'd
+rather not pair screens, **Settings → Displays → Show boards on any device**
+brings back the old behavior, where anyone who can reach Hearthboard can see
+your boards. That includes the internet if you've published it, so leave it off
+unless the network is yours alone. It's also what a board shown in a frame on
+another site needs (`HEARTHBOARD_EMBED_ORIGINS`, for example in Home Assistant):
+browsers don't send the pairing cookie to a frame of a different site.
+
+**Upgrading?** Boards used to be visible to any device. After updating, each
+screen shows a code until you pair it once. Nothing else changes for people who
+sign in.
+
 ### Upgrading from the admin PIN
 
 Earlier versions had a single admin PIN. After upgrading, sign in with the
@@ -148,7 +192,7 @@ username **`admin`** and your old PIN as the password; that user owns all your
 existing boards. Then change the password (**Settings → My account**), rename
 yourself if you like (**Settings → People → Edit**), and add the rest of the
 family. Every device is signed
-out once by the upgrade. TVs showing the board aren't affected.
+out once by the upgrade.
 
 ## Configuration
 
@@ -159,8 +203,9 @@ Accounts and settings live in the web app under **Settings**, not in Docker:
   sign-in.
 - **General** (admins): time zone, how often calendars sync, and the public
   HTTPS address used for Google sign-in.
-- **Calendars, Apple Reminders, Photos** (admins): every account sign-in, and
-  calendar subscriptions (holidays, school, sports).
+- **Calendars, Apple Reminders, Photos** (admins): every account sign-in,
+  calendar subscriptions (holidays, school, sports), and which calendars
+  family members can add and change events on.
 - **Checklists, Verses & quotes** (everyone).
 
 Notes and the meal plan live on the **Family** page.
@@ -180,11 +225,23 @@ Docker only needs what the container itself requires:
 | `HEARTHBOARD_DEMO`           | (off)           | `1` loads sample calendars, reminders and photos.                                                                                                    |
 | `HEARTHBOARD_ADMIN_PASSWORD` | (none)          | Optional. On first start, create an `admin` user with this password instead of setting one up on first visit. Ignored once anyone has signed up.     |
 | `HEARTHBOARD_RESET_ADMIN`    | (off)           | Recovery only: `1` resets the `admin` user to `HEARTHBOARD_ADMIN_PASSWORD` with two-step sign-in off, on every start. Remove it once you're back in. |
+| `HEARTHBOARD_TRUST_PROXY`    | (off)           | Behind a reverse proxy (e.g. DSM's, for HTTPS): the proxy's address or `true`, so sign-in lockouts see each device's own address.                    |
+| `HEARTHBOARD_EMBED_ORIGINS`  | (none)          | Optional. Sites allowed to show the board in a frame, such as a Home Assistant dashboard: `http://homeassistant.local:8123`.                         |
+| `HEARTHBOARD_ALLOWED_HOSTS`  | (none)          | Extra names the server answers to, comma-separated (see below). `*.example.com` includes subdomains; `*` turns the check off.                        |
 
 Older compose files that still set `TZ`, `HEARTHBOARD_SYNC_INTERVAL` or
 `HEARTHBOARD_PUBLIC_URL` keep working: those values are used only until you
 change the setting in the web app, and can be removed. `HEARTHBOARD_PIN` works
 like `HEARTHBOARD_ADMIN_PASSWORD`.
+
+Hearthboard only answers to the addresses a home network normally uses: IP
+addresses, `localhost`, one-word names like `diskstation`, names ending in
+`.local`, `.lan`, `.home.arpa`, `.internal` or `.localdomain`, and the public
+HTTPS address saved under **Settings → General**. That stops a web page someone
+visits from reading your board through your NAS (a trick called DNS
+rebinding). If you reach the board by another name, add it to
+`HEARTHBOARD_ALLOWED_HOSTS`. A browser that uses an unknown name is told which
+one, and you can always open the board by IP address instead.
 
 ## Themes and text sizes
 
@@ -241,6 +298,9 @@ point at a theme or size you later remove fall back to the defaults.
     hashed.
   - Sessions are stored hashed. Changing a password or turning on two-step
     sign-in signs out your other devices.
+  - Boards, calendars, photos and the live connection are shown only to signed-in
+    people and to screens an admin has paired. A paired screen holds a random
+    token in a cookie (stored hashed, like sessions) that an admin can revoke.
   - The reminders endpoint uses its own token.
   - The container runs as your user, and the photo mount is read-only.
 

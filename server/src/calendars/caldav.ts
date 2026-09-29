@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { createDAVClient, type DAVCalendar, type DAVCalendarObject } from 'tsdav';
 import type { EventDelete, EventInput, EventPatch } from '@hearthboard/shared';
+import { timedFetch } from '../util';
 import { buildIcs, patchIcs, removeOccurrence } from './ics';
 import {
   AuthError,
@@ -58,6 +59,8 @@ export class CalDavProvider implements CalendarProvider {
         credentials: { username: this.secret.username, password: this.secret.password },
         authMethod: 'Basic',
         defaultAccountType: 'caldav',
+        // Every request tsdav makes goes through this, so a stalled server can't hang a sync.
+        fetch: timedFetch,
       }).catch((err: unknown) => {
         this.clientPromise = null;
         const msg = err instanceof Error ? err.message : String(err);

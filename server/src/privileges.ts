@@ -1,19 +1,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-function chownTree(p: string, uid: number, gid: number) {
+function lchown(p: string, uid: number, gid: number): boolean {
   try {
     fs.lchownSync(p, uid, gid);
+    return true;
   } catch {
-    return;
+    return false;
   }
+}
+
+function chownTree(p: string, uid: number, gid: number) {
+  if (!lchown(p, uid, gid)) return;
   let entries: fs.Dirent[] = [];
   try {
     entries = fs.readdirSync(p, { withFileTypes: true });
   } catch {
     return;
   }
-  for (const e of entries) chownTree(path.join(p, e.name), uid, gid);
+  for (const e of entries) {
+    // Only walk into real folders: following a symlink could hand files outside /data to PUID.
+    if (e.isDirectory()) chownTree(path.join(p, e.name), uid, gid);
+    else lchown(path.join(p, e.name), uid, gid);
+  }
 }
 
 /**
@@ -24,9 +33,14 @@ function chownTree(p: string, uid: number, gid: number) {
 export function dropPrivileges(dataDir: string, env = process.env): string | null {
   const { getuid, setgid, setuid, setgroups } = process;
   if (!getuid || !setgid || !setuid || getuid() !== 0) return null; // not POSIX, or not root
-  const uid = Number(env.PUID);
-  const gid = Number(env.PGID);
-  if (!Number.isInteger(uid) || !Number.isInteger(gid) || uid <= 0) return null;
+  const { PUID, PGID } = env;
+  if (PUID === undefined && PGID === undefined) return null;
+  // A typo or an empty value must not quietly leave the server running as root.
+  if (!/^\d+$/.test(PUID ?? '') || !/^\d+$/.test(PGID ?? ''))
+    throw new Error(`PUID and PGID must be numbers (got "${PUID}" and "${PGID}").`);
+  const uid = Number(PUID);
+  const gid = Number(PGID);
+  if (uid === 0) return null; // asked to stay root
   fs.mkdirSync(dataDir, { recursive: true });
   chownTree(dataDir, uid, gid);
   setgroups?.([gid]);

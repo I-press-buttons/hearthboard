@@ -1,4 +1,5 @@
 import { Agent } from 'undici';
+import { requestTimeout } from '../util';
 
 export interface SynologySecret {
   /** e.g. http://192.168.1.10:5000 or https://nas.local:5001 */
@@ -49,19 +50,30 @@ export class SynologyPhotos {
     if (secret.insecure) this.dispatcher = new Agent({ connect: { rejectUnauthorized: false } });
   }
 
-  private endpoint(params: Record<string, string>): string {
-    const base = this.secret.url.replace(/\/+$/, '');
-    return `${base}/webapi/entry.cgi?${new URLSearchParams(params)}`;
+  private endpoint(): string {
+    return `${this.secret.url.replace(/\/+$/, '')}/webapi/entry.cgi`;
   }
 
-  private async raw(params: Record<string, string>): Promise<Response> {
-    const init: RequestInit & { dispatcher?: Agent } = {};
-    if (this.dispatcher) init.dispatcher = this.dispatcher;
-    return this.f(this.endpoint(params), init);
+  private send(url: string, init: RequestInit): Promise<Response> {
+    const withTimeout: RequestInit & { dispatcher?: Agent } = { ...init, signal: requestTimeout() };
+    if (this.dispatcher) withTimeout.dispatcher = this.dispatcher;
+    return this.f(url, withTimeout);
+  }
+
+  /**
+   * Send the parameters in a POST body. The password and the session ID stay out of the URL,
+   * which proxies, browsers' history and DSM's own logs would otherwise keep.
+   */
+  private post(params: Record<string, string>): Promise<Response> {
+    return this.send(this.endpoint(), {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(params).toString(),
+    });
   }
 
   async login(): Promise<string> {
-    const res = await this.raw({
+    const res = await this.post({
       api: 'SYNO.API.Auth',
       version: '6',
       method: 'login',
@@ -87,7 +99,7 @@ export class SynologyPhotos {
 
   private async call<T>(params: Record<string, string>, retry = true): Promise<T> {
     const sid = this.sid ?? (await this.login());
-    const res = await this.raw({ ...params, _sid: sid });
+    const res = await this.post({ ...params, _sid: sid });
     const body = (await res.json()) as SynoResponse<T>;
     if (!body.success) {
       if (retry && SESSION_ERRORS.has(body.error?.code ?? 0)) {
@@ -153,10 +165,14 @@ export class SynologyPhotos {
     return out;
   }
 
-  /** The XL thumbnail (longest side ~1280px), already rotated and in JPEG. */
+  /**
+   * The XL thumbnail (longest side ~1280px), already rotated and in JPEG. Unlike the calls
+   * above this is still a GET with the session ID in the URL, because we couldn't confirm
+   * that DSM accepts a POST for a thumbnail download.
+   */
   async thumbnail(unitId: number, cacheKey: string): Promise<Buffer> {
-    const fetchIt = async () =>
-      this.raw({
+    const fetchIt = async () => {
+      const query = new URLSearchParams({
         api: 'SYNO.Foto.Thumbnail',
         version: '1',
         method: 'get',
@@ -167,6 +183,8 @@ export class SynologyPhotos {
         cache_key: cacheKey,
         _sid: this.sid ?? (await this.login()),
       });
+      return this.send(`${this.endpoint()}?${query}`, {});
+    };
     let res = await fetchIt();
     if (!(res.headers.get('content-type') ?? '').startsWith('image/')) {
       this.sid = null;

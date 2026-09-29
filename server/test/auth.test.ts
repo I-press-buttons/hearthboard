@@ -83,6 +83,52 @@ describe('sign-in', () => {
     expect((await app.signIn('admin', 'from the environment')).status).toBe(429);
   });
 
+  it("doesn't let a made-up X-Forwarded-For header dodge the lockout", async () => {
+    app = await testApp({ adminPassword: 'from the environment' });
+    for (let i = 0; i < 5; i++) {
+      await app.inject(
+        'POST',
+        '/api/auth/login',
+        { username: 'admin', password: 'nope' },
+        { 'x-forwarded-for': `10.0.0.${i}` },
+      );
+    }
+    const res = await app.inject(
+      'POST',
+      '/api/auth/login',
+      { username: 'admin', password: 'from the environment' },
+      { 'x-forwarded-for': '10.0.0.99' },
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it("doesn't forget wrong guesses at one account when you sign in to another", async () => {
+    app = await testApp();
+    await app.login();
+    await addUser(app, 'sam');
+    const sam = app.client();
+    for (let round = 0; round < 3; round++) {
+      for (let i = 0; i < 2; i++) await sam.signIn('admin', 'guess');
+      expect((await sam.signIn('sam', 'sam-password')).status).toBe(200);
+    }
+    expect((await sam.signIn('admin', ADMIN.password)).status).toBe(429);
+    // Sam's own sign-in isn't held up by the guesses at the admin's.
+    expect((await sam.signIn('sam', 'sam-password')).status).toBe(200);
+  });
+
+  it('counts wrong passwords when turning off two-step sign-in or making recovery codes', async () => {
+    app = await testApp();
+    await app.login();
+    await enableMfa(app);
+    for (let i = 0; i < 3; i++)
+      await app.inject('POST', '/api/auth/totp/disable', { password: 'nope' });
+    for (let i = 0; i < 2; i++)
+      await app.inject('POST', '/api/auth/recovery-codes', { password: 'nope' });
+    expect(
+      (await app.inject('POST', '/api/auth/totp/disable', { password: ADMIN.password })).status,
+    ).toBe(429);
+  });
+
   it('changing your password signs out your other devices', async () => {
     app = await testApp();
     await app.login();
@@ -154,6 +200,19 @@ describe('two-step sign-in', () => {
     const d = app.client();
     await d.signIn('admin', ADMIN.password);
     expect((await d.inject('POST', '/api/auth/mfa', { code: recoveryCodes[0] })).status).toBe(401);
+  });
+
+  it("doesn't let signing in again with the password reset the count of wrong codes", async () => {
+    app = await testApp();
+    await app.login();
+    await enableMfa(app);
+    const thief = app.client();
+    for (let round = 0; round < 3; round++) {
+      expect((await thief.signIn('admin', ADMIN.password)).body).toEqual({ stage: 'mfa' });
+      for (let i = 0; i < 2; i++) await thief.inject('POST', '/api/auth/mfa', { code: '000000' });
+    }
+    await thief.signIn('admin', ADMIN.password);
+    expect((await thief.inject('POST', '/api/auth/mfa', { code: '000000' })).status).toBe(429);
   });
 
   it('makes you start over after too many wrong codes', async () => {
@@ -235,6 +294,18 @@ describe('two-step sign-in', () => {
     expect(enabled.status).toBe(200);
     expect((await sam.inject('GET', '/api/auth/status')).body.authenticated).toBe(true);
     expect((await sam.inject('GET', '/api/boards')).status).toBe(200);
+
+    // Turning it off while it's required keeps this device, but every other one has to sign
+    // in (and set it up) again.
+    const samPhone = app.client();
+    await samPhone.signIn('sam', 'sam-password');
+    await samPhone.inject('POST', '/api/auth/mfa', { code: code(setup.body.secret, 1) });
+    expect((await samPhone.inject('GET', '/api/auth/status')).body.authenticated).toBe(true);
+    expect(
+      (await sam.inject('POST', '/api/auth/totp/disable', { password: 'sam-password' })).status,
+    ).toBe(200);
+    expect((await sam.inject('GET', '/api/auth/status')).body.authenticated).toBe(true);
+    expect((await samPhone.inject('GET', '/api/auth/status')).body.authenticated).toBe(false);
 
     // Members can't change the rule.
     expect((await sam.inject('PUT', '/api/auth/policy', { requireMfa: false })).status).toBe(403);
@@ -364,11 +435,11 @@ describe('boards per person', () => {
     const all = (await app.inject('GET', '/api/boards')).body;
     expect(all.map((b: { ownerName: string }) => b.ownerName)).toEqual(['Admin', 'Sam']);
 
-    // Sam can't touch the admin's board, but the display still shows it to anyone.
+    // Sam can't touch the admin's board, but a paired display still shows it.
     const main = (await app.inject('GET', '/api/boards/main')).body;
     expect((await samClient.inject('PUT', '/api/boards/main', main)).status).toBe(403);
     expect((await samClient.inject('DELETE', '/api/boards/main')).status).toBe(403);
-    expect((await app.client().inject('GET', '/api/boards/main')).status).toBe(200);
+    expect((await (await app.display()).inject('GET', '/api/boards/main')).status).toBe(200);
     expect((await samClient.inject('PUT', '/api/boards/nope', main)).status).toBe(404);
 
     // Sam's own board is Sam's to change; so is the admin's to help with.
@@ -384,6 +455,9 @@ describe('boards per person', () => {
       await samClient.inject('POST', '/api/boards', { name: 'Desk', copyFrom: 'main' })
     ).body;
     expect((await samClient.inject('GET', '/api/boards')).body).toHaveLength(2);
+    for (const bad of [{ copyFrom: {} }, { name: 123 }, { name: 'x'.repeat(101) }]) {
+      expect((await samClient.inject('POST', '/api/boards', bad)).status).toBe(400);
+    }
     expect((await app.inject('GET', `/api/boards/${extra.id}`)).body.widgets).toEqual(main.widgets);
     expect((await samClient.inject('DELETE', `/api/boards/${extra.id}`)).status).toBe(200);
     expect((await samClient.inject('DELETE', `/api/boards/${samBoard.id}`)).status).toBe(400);

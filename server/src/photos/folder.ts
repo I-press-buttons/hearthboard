@@ -14,6 +14,8 @@ const IMAGE_EXT = new Set([
   '.tiff',
 ]);
 const HEIF_EXT = new Set(['.heic', '.heif']);
+/** Synology metadata (@eaDir), recycle bins (#recycle) and dotfiles. */
+const HIDDEN = /^[@#.]/;
 const MAX_FILES = 100_000;
 const RESCAN_MS = 30 * 60_000;
 
@@ -46,6 +48,17 @@ export class FolderSource {
     return abs === this.root || abs.startsWith(this.root + path.sep) ? abs : null;
   }
 
+  /**
+   * The one spelling of a path under the root (`a/..`, `./a/` and `a` are all "a"), or null
+   * if it's outside the root or hidden.
+   */
+  folderKey(sub: string): string | null {
+    const abs = this.resolve(sub);
+    if (!abs) return null;
+    const rel = path.relative(this.root, abs);
+    return rel.split(path.sep).some((s) => HIDDEN.test(s)) ? null : rel;
+  }
+
   async available(): Promise<boolean> {
     try {
       return (await fs.stat(this.root)).isDirectory();
@@ -56,11 +69,11 @@ export class FolderSource {
 
   /** Relative paths of every image under `sub` (cached, rescanned every 30 minutes). */
   list(sub = ''): Promise<string[]> {
-    const key = sub.replace(/^\/+|\/+$/g, '');
+    const key = this.folderKey(sub);
+    if (key === null) return Promise.resolve([]);
     const cur = this.scans.get(key);
     if (cur && Date.now() - cur.at < RESCAN_MS) return cur.files;
-    const start = this.resolve(key);
-    const files = start ? this.scan(start) : Promise.resolve([]);
+    const files = this.scan(path.join(this.root, key));
     this.scans.set(key, { at: Date.now(), files });
     files.catch(() => this.scans.delete(key));
     return files;
@@ -77,8 +90,7 @@ export class FolderSource {
       }
       for (const e of entries) {
         if (out.length >= MAX_FILES) return;
-        // Skip Synology metadata (@eaDir), recycle bins (#recycle) and dotfiles.
-        if (/^[@#.]/.test(e.name)) continue;
+        if (HIDDEN.test(e.name)) continue;
         const abs = path.join(d, e.name);
         if (e.isDirectory()) await walk(abs);
         else if (e.isFile() && IMAGE_EXT.has(path.extname(e.name).toLowerCase())) {
@@ -95,7 +107,7 @@ export class FolderSource {
     try {
       const entries = await fs.readdir(this.root, { withFileTypes: true });
       return entries
-        .filter((e) => e.isDirectory() && !/^[@#.]/.test(e.name))
+        .filter((e) => e.isDirectory() && !HIDDEN.test(e.name))
         .map((e) => e.name)
         .sort();
     } catch {
@@ -108,8 +120,16 @@ export class FolderSource {
    * JPEG thumbnail Synology already generated, since HEVC decoding isn't bundled.
    */
   async readable(rel: string): Promise<string | null> {
-    const abs = this.resolve(rel);
-    if (!abs || !(await exists(abs))) return null;
+    // Only what a scan would list: a visible image, and not through a symlink out of the root.
+    const key = this.folderKey(rel);
+    if (!key || !IMAGE_EXT.has(path.extname(key).toLowerCase())) return null;
+    const abs = path.join(this.root, key);
+    try {
+      const [real, realRoot] = await Promise.all([fs.realpath(abs), fs.realpath(this.root)]);
+      if (!real.startsWith(realRoot + path.sep)) return null;
+    } catch {
+      return null;
+    }
     if (HEIF_EXT.has(path.extname(abs).toLowerCase())) {
       const thumb = synologyThumb(abs);
       if (await exists(thumb)) return thumb;

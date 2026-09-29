@@ -1110,6 +1110,65 @@ code,
   height: 64px;
 }
 
+/* An unpaired screen: big enough to read a code from across the room. */
+.pair-screen {
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5vmin;
+  padding: 5vmin;
+  text-align: center;
+}
+
+.pair-screen img {
+  width: 12vmin;
+  height: 12vmin;
+}
+
+.pair-screen h1 {
+  margin: 0;
+  font-size: clamp(28px, 7vmin, 84px);
+}
+
+.pair-screen p {
+  margin: 0;
+  max-width: 34em;
+  color: var(--muted);
+  font-size: clamp(16px, 3vmin, 34px);
+  line-height: 1.4;
+}
+
+.pair-screen p b {
+  color: var(--text);
+}
+
+.pair-code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  /* Also fits the width of a phone held upright. */
+  font-size: clamp(32px, min(16vmin, 12vw), 200px);
+  white-space: nowrap;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  padding: 0.1em 0.3em;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+}
+
+.pair-screen .pair-note {
+  font-size: clamp(14px, 2.2vmin, 24px);
+  color: var(--faint);
+}
+
+.pair-link {
+  color: var(--faint);
+  font-size: clamp(13px, 2vmin, 20px);
+}
+
 .pin-input {
   font-size: 28px !important;
   letter-spacing: 0.4em;
@@ -1168,6 +1227,11 @@ code,
   border: 1px solid var(--chrome-border);
   border-radius: 10px;
   padding: 10px 12px;
+}
+
+.notice.warn {
+  border-color: var(--danger);
+  color: var(--text);
 }
 
 .card h3 {
