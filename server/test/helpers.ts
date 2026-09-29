@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import { buildApp, type BuildOptions } from '../src/app';
 import { loadConfig, type Config } from '../src/config';
@@ -27,7 +28,14 @@ export async function testApp(overrides: Partial<Config> = {}, opts: BuildOption
   };
   const ctx = await buildApp(config, { background: false, ...opts });
   await ctx.app.ready();
+  const client = () => testClient(ctx.app);
+  return { ...ctx, config, client, ...client() };
+}
 
+export const ADMIN = { username: 'admin', name: 'Admin', password: 'correct horse' };
+
+/** A browser: its own cookie jar, signed in as one user at a time. */
+export function testClient(app: FastifyInstance) {
   let cookie = '';
   const inject = async (
     method: string,
@@ -35,7 +43,7 @@ export async function testApp(overrides: Partial<Config> = {}, opts: BuildOption
     body?: unknown,
     headers: Record<string, string> = {},
   ) => {
-    const res = await ctx.app.inject({
+    const res = await app.inject({
       method: method as 'GET',
       url,
       payload: body === undefined ? undefined : (body as object),
@@ -45,14 +53,17 @@ export async function testApp(overrides: Partial<Config> = {}, opts: BuildOption
     if (set) cookie = (Array.isArray(set) ? set[0] : set).split(';')[0];
     return { status: res.statusCode, body: res.body ? safeJson(res.body) : null, raw: res };
   };
-  const login = async (pin = '1234') => {
-    const setup = await inject('POST', '/api/auth/setup', { pin });
-    if (setup.status !== 200) await inject('POST', '/api/auth/login', { pin });
+  /** Sign in as the admin, creating it on first use. */
+  const login = async () => {
+    const setup = await inject('POST', '/api/auth/setup', ADMIN);
+    if (setup.status !== 200) await signIn(ADMIN.username, ADMIN.password);
   };
+  const signIn = (username: string, password: string) =>
+    inject('POST', '/api/auth/login', { username, password });
   const logout = () => {
     cookie = '';
   };
-  return { ...ctx, config, inject, login, logout };
+  return { inject, login, signIn, logout };
 }
 
 function safeJson(s: string) {

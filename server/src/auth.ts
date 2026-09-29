@@ -1,25 +1,50 @@
 import crypto from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { z } from 'zod';
+import {
+  CodeInput,
+  LoginInput,
+  PasswordChange,
+  PasswordConfirm,
+  SecurityPolicy,
+  SetupInput,
+  type AuthStatus,
+} from '@hearthboard/shared';
 import { getSetting, setSetting, type DB } from './db';
+import type { UserRow, Users } from './users';
+import { HttpError } from './util';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    /** The signed-in user; set by `auth.guard`. */
+    user: UserRow | null;
+  }
+}
 
 const COOKIE = 'hb_session';
 const SESSION_TTL_MS = 365 * 24 * 3600 * 1000;
-const PinBody = z.object({ pin: z.string().regex(/^\d{4,12}$/, 'PIN must be 4-12 digits') });
+/** How long a half-done sign-in (waiting for a code or authenticator setup) stays open. */
+const PENDING_TTL_MS = 15 * 60_000;
+/** Wrong codes allowed before the password has to be entered again. */
+const MAX_CODE_ATTEMPTS = 5;
 
-interface PinHash {
-  salt: string;
-  hash: string;
+type Stage = 'mfa' | 'enroll' | 'full';
+
+interface SessionRow {
+  token_hash: string;
+  user_id: string;
+  stage: Stage;
+  attempts: number;
+  created_at: number;
+  last_seen: number;
 }
 
-function hashPin(pin: string, salt = crypto.randomBytes(16).toString('base64url')): PinHash {
-  const hash = crypto.scryptSync(pin, salt, 32).toString('base64url');
-  return { salt, hash };
-}
+const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 
-function checkPin(pin: string, stored: PinHash): boolean {
-  const { hash } = hashPin(pin, stored.salt);
-  return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(stored.hash));
+export interface AuthOptions {
+  /** Password for an "admin" user created on first start (HEARTHBOARD_ADMIN_PASSWORD). */
+  adminPassword: string | null;
+  /** Reset "admin" to `adminPassword` with two-step sign-in off (HEARTHBOARD_RESET_ADMIN). */
+  resetAdmin: boolean;
 }
 
 export class Auth {
@@ -27,15 +52,51 @@ export class Auth {
 
   constructor(
     private db: DB,
-    envPin: string | null,
+    private users: Users,
   ) {
-    if (envPin) setSetting(db, 'adminPin', hashPin(envPin));
     if (!getSetting<string>(db, 'ingestToken')) this.rotateIngestToken();
   }
 
-  pinSet(): boolean {
-    return !!getSetting<PinHash>(this.db, 'adminPin');
+  /** Apply the admin settings from the environment. Returns a warning to log, if any. */
+  async init(opts: AuthOptions): Promise<string | null> {
+    const { adminPassword, resetAdmin } = opts;
+    if (resetAdmin) {
+      if (!adminPassword)
+        return 'HEARTHBOARD_RESET_ADMIN is set without HEARTHBOARD_ADMIN_PASSWORD; nothing was reset.';
+      let admin = this.users.byUsername('admin');
+      if (!admin) {
+        admin = await this.users.create({
+          username: 'admin',
+          name: 'Admin',
+          password: adminPassword,
+          role: 'admin',
+        });
+      }
+      await this.users.setPassword(admin.id, adminPassword);
+      this.users.update(admin.id, { role: 'admin' });
+      this.users.disableTotp(admin.id);
+      this.endSessions(admin.id);
+      this.users.adoptOrphanBoards(admin.id);
+      return (
+        'HEARTHBOARD_RESET_ADMIN: the "admin" user\'s password was reset and its two-step ' +
+        'sign-in turned off. Remove HEARTHBOARD_RESET_ADMIN now so this is not repeated on every start.'
+      );
+    }
+    if (adminPassword && this.users.count() === 0) {
+      const admin = await this.users.create(
+        { username: 'admin', name: 'Admin', password: adminPassword, role: 'admin' },
+        { onlyIfFirst: true },
+      );
+      this.users.adoptOrphanBoards(admin.id);
+    }
+    return null;
   }
+
+  requireMfa(): boolean {
+    return getSetting<boolean>(this.db, 'requireMfa') ?? false;
+  }
+
+  // ---------------- reminders ingest token ----------------
 
   ingestToken(): string {
     return getSetting<string>(this.db, 'ingestToken')!;
@@ -56,87 +117,261 @@ export class Auth {
     );
   }
 
-  isAuthenticated(req: FastifyRequest): boolean {
+  // ---------------- sessions ----------------
+
+  private session(req: FastifyRequest): { s: SessionRow; user: UserRow } | null {
     const token = req.cookies[COOKIE];
-    if (!token) return false;
-    const row = this.db.prepare('SELECT last_seen FROM sessions WHERE token = ?').get(token) as
-      { last_seen: number } | undefined;
-    if (!row) return false;
+    if (!token) return null;
+    const s = this.db
+      .prepare('SELECT * FROM sessions WHERE token_hash = ?')
+      .get(hashToken(token)) as SessionRow | undefined;
+    if (!s) return null;
     const now = Date.now();
-    if (now - row.last_seen > SESSION_TTL_MS) {
-      this.db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
-      return false;
+    const expired =
+      s.stage === 'full' ? now - s.last_seen > SESSION_TTL_MS : now - s.created_at > PENDING_TTL_MS;
+    const user = expired ? undefined : this.users.get(s.user_id);
+    if (!user) {
+      this.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(s.token_hash);
+      return null;
     }
-    if (now - row.last_seen > 3600_000) {
-      this.db.prepare('UPDATE sessions SET last_seen = ? WHERE token = ?').run(now, token);
+    if (s.stage === 'full' && now - s.last_seen > 3600_000) {
+      this.db
+        .prepare('UPDATE sessions SET last_seen = ? WHERE token_hash = ?')
+        .run(now, s.token_hash);
     }
-    return true;
+    return { s, user };
   }
 
-  /** preHandler guarding admin routes. */
+  /** The fully signed-in user, or null. */
+  currentUser(req: FastifyRequest): UserRow | null {
+    const cur = this.session(req);
+    return cur?.s.stage === 'full' ? cur.user : null;
+  }
+
+  isAuthenticated(req: FastifyRequest): boolean {
+    return !!this.currentUser(req);
+  }
+
+  isAdmin(req: FastifyRequest): boolean {
+    return this.currentUser(req)?.role === 'admin';
+  }
+
+  /** preHandler for anything a signed-in household member may do. */
   guard = async (req: FastifyRequest, reply: FastifyReply) => {
-    if (!this.isAuthenticated(req)) {
-      return reply.code(401).send({ error: 'Log in with the admin PIN first.' });
-    }
+    req.user = this.currentUser(req);
+    if (!req.user) return reply.code(401).send({ error: 'Sign in first.' });
   };
 
-  private startSession(reply: FastifyReply) {
+  /** preHandler for household settings: accounts, people, tokens. */
+  adminGuard = async (req: FastifyRequest, reply: FastifyReply) => {
+    req.user = this.currentUser(req);
+    if (!req.user) return reply.code(401).send({ error: 'Sign in first.' });
+    if (req.user.role !== 'admin')
+      return reply.code(403).send({ error: 'Only an admin can do that.' });
+  };
+
+  private startSession(reply: FastifyReply, userId: string, stage: Stage) {
     const token = crypto.randomBytes(32).toString('base64url');
     const now = Date.now();
+    // Forget sessions nobody came back to.
     this.db
-      .prepare('INSERT INTO sessions (token, created_at, last_seen) VALUES (?, ?, ?)')
-      .run(token, now, now);
+      .prepare(
+        `DELETE FROM sessions WHERE (stage = 'full' AND last_seen < ?)
+           OR (stage <> 'full' AND created_at < ?)`,
+      )
+      .run(now - SESSION_TTL_MS, now - PENDING_TTL_MS);
+    this.db
+      .prepare(
+        'INSERT INTO sessions (token_hash, user_id, stage, created_at, last_seen) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(hashToken(token), userId, stage, now, now);
     reply.setCookie(COOKIE, token, {
       path: '/',
       httpOnly: true,
       sameSite: 'lax',
-      maxAge: SESSION_TTL_MS / 1000,
+      secure: 'auto',
+      maxAge: stage === 'full' ? SESSION_TTL_MS / 1000 : PENDING_TTL_MS / 1000,
     });
   }
 
-  register(app: FastifyInstance) {
-    app.get('/api/auth/status', async (req) => ({
-      authenticated: this.isAuthenticated(req),
-      pinSet: this.pinSet(),
-    }));
+  private endSession(req: FastifyRequest) {
+    const token = req.cookies[COOKIE];
+    if (token) this.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(hashToken(token));
+  }
 
+  /** Sign a user out everywhere, except the session making this request. */
+  endSessions(userId: string, keep?: FastifyRequest) {
+    const token = keep?.cookies[COOKIE];
+    this.db
+      .prepare('DELETE FROM sessions WHERE user_id = ? AND token_hash <> ?')
+      .run(userId, token ? hashToken(token) : '');
+  }
+
+  // ---------------- brute-force protection ----------------
+
+  private checkThrottle(req: FastifyRequest) {
+    const fail = this.failures.get(req.ip);
+    if (fail && fail.until > Date.now())
+      throw new HttpError(429, 'Too many attempts. Wait a bit and try again.');
+  }
+
+  private recordFailure(req: FastifyRequest) {
+    const count = (this.failures.get(req.ip)?.count ?? 0) + 1;
+    this.failures.set(req.ip, {
+      count,
+      until: count >= 5 ? Date.now() + 30_000 * (count - 4) : 0,
+    });
+  }
+
+  // ---------------- routes ----------------
+
+  register(app: FastifyInstance) {
+    app.decorateRequest('user', null);
+    const signedIn = { preHandler: this.guard };
+
+    app.get('/api/auth/status', async (req): Promise<AuthStatus> => {
+      const cur = this.session(req);
+      const full = cur?.s.stage === 'full';
+      return {
+        setupNeeded: this.users.count() === 0,
+        authenticated: full,
+        stage: cur && !full ? (cur.s.stage as 'mfa' | 'enroll') : null,
+        user: full ? this.users.toDTO(cur.user) : null,
+        requireMfa: this.requireMfa(),
+        legacyPin: !!this.users.legacyPinUser(),
+      };
+    });
+
+    // First run: create the first admin.
     app.post('/api/auth/setup', async (req, reply) => {
-      if (this.pinSet()) return reply.code(409).send({ error: 'A PIN is already set.' });
-      const { pin } = PinBody.parse(req.body);
-      setSetting(this.db, 'adminPin', hashPin(pin));
-      this.startSession(reply);
-      return { ok: true };
+      const input = SetupInput.parse(req.body);
+      const user = await this.users.create({ ...input, role: 'admin' }, { onlyIfFirst: true });
+      this.users.adoptOrphanBoards(user.id);
+      this.startSession(reply, user.id, 'full');
+      return { stage: 'full' };
     });
 
     app.post('/api/auth/login', async (req, reply) => {
-      const ip = req.ip;
-      const fail = this.failures.get(ip);
-      if (fail && fail.until > Date.now()) {
-        return reply.code(429).send({ error: 'Too many attempts. Wait a bit and try again.' });
+      this.checkThrottle(req);
+      const { username, password } = LoginInput.parse(req.body);
+      const user = this.users.byUsername(username);
+      if (!(await this.users.checkPassword(user, password))) {
+        this.recordFailure(req);
+        return reply.code(401).send({ error: 'Wrong username or password.' });
       }
-      const { pin } = PinBody.parse(req.body);
-      const stored = getSetting<PinHash>(this.db, 'adminPin');
-      if (!stored || !checkPin(pin, stored)) {
-        const count = (fail?.count ?? 0) + 1;
-        this.failures.set(ip, { count, until: count >= 5 ? Date.now() + 30_000 * (count - 4) : 0 });
-        return reply.code(401).send({ error: 'Wrong PIN.' });
+      this.failures.delete(req.ip);
+      this.endSession(req);
+      const stage: Stage = user!.totp_secret ? 'mfa' : this.requireMfa() ? 'enroll' : 'full';
+      this.startSession(reply, user!.id, stage);
+      return { stage };
+    });
+
+    // Second step: a code from the authenticator app, or a recovery code.
+    app.post('/api/auth/mfa', async (req, reply) => {
+      this.checkThrottle(req);
+      const cur = this.session(req);
+      if (cur?.s.stage !== 'mfa')
+        return reply.code(401).send({ error: 'That sign-in expired. Start again.' });
+      const { code } = CodeInput.parse(req.body);
+      const used = this.users.verifySecondFactor(cur.user.id, code);
+      if (!used) {
+        this.recordFailure(req);
+        const attempts = cur.s.attempts + 1;
+        if (attempts >= MAX_CODE_ATTEMPTS) {
+          this.endSession(req);
+          return reply.code(401).send({ error: 'Too many wrong codes. Start again.' });
+        }
+        this.db
+          .prepare('UPDATE sessions SET attempts = ? WHERE token_hash = ?')
+          .run(attempts, cur.s.token_hash);
+        return reply.code(401).send({ error: 'That code is not right.' });
       }
-      this.failures.delete(ip);
-      this.startSession(reply);
-      return { ok: true };
+      this.failures.delete(req.ip);
+      this.endSession(req);
+      this.startSession(reply, cur.user.id, 'full');
+      return {
+        stage: 'full',
+        usedRecoveryCode: used === 'recovery',
+        recoveryCodesLeft: this.users.recoveryCodesLeft(cur.user.id),
+      };
     });
 
     app.post('/api/auth/logout', async (req, reply) => {
-      const token = req.cookies[COOKIE];
-      if (token) this.db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+      this.endSession(req);
       reply.clearCookie(COOKIE, { path: '/' });
       return { ok: true };
     });
 
-    app.post('/api/auth/pin', { preHandler: this.guard }, async (req) => {
-      const { pin } = PinBody.parse(req.body);
-      setSetting(this.db, 'adminPin', hashPin(pin));
+    app.post('/api/auth/password', signedIn, async (req) => {
+      this.checkThrottle(req);
+      const { current, password } = PasswordChange.parse(req.body);
+      if (!(await this.users.checkPassword(req.user!, current))) {
+        this.recordFailure(req);
+        throw new HttpError(400, 'Your current password is not right.');
+      }
+      await this.users.setPassword(req.user!.id, password);
+      this.endSessions(req.user!.id, req);
       return { ok: true };
+    });
+
+    // Authenticator setup. Also reachable mid-sign-in when the household requires it.
+    const enrolling = async (req: FastifyRequest, reply: FastifyReply) => {
+      const cur = this.session(req);
+      if (!cur || cur.s.stage === 'mfa') return reply.code(401).send({ error: 'Sign in first.' });
+      req.user = cur.user;
+    };
+
+    app.post('/api/auth/totp/setup', { preHandler: enrolling }, async (req) => {
+      if (req.user!.totp_secret)
+        throw new HttpError(409, 'Two-step sign-in is already on. Turn it off first.');
+      return this.users.startTotp(req.user!.id);
+    });
+
+    app.post('/api/auth/totp/enable', { preHandler: enrolling }, async (req, reply) => {
+      if (req.user!.totp_secret) throw new HttpError(409, 'Two-step sign-in is already on.');
+      const { code } = CodeInput.parse(req.body);
+      const recoveryCodes = this.users.confirmTotp(req.user!.id, code);
+      if (!recoveryCodes)
+        throw new HttpError(400, 'That code is not right. Check the time on your phone.');
+      // Other devices signed in without the second step: sign them out.
+      this.endSessions(req.user!.id, req);
+      if (this.session(req)?.s.stage === 'enroll') {
+        this.endSession(req);
+        this.startSession(reply, req.user!.id, 'full');
+      }
+      return { recoveryCodes };
+    });
+
+    app.post('/api/auth/totp/disable', signedIn, async (req) => {
+      const { password } = PasswordConfirm.parse(req.body);
+      if (!(await this.users.checkPassword(req.user!, password)))
+        throw new HttpError(400, 'Your password is not right.');
+      this.users.disableTotp(req.user!.id);
+      return { ok: true };
+    });
+
+    app.post('/api/auth/recovery-codes', signedIn, async (req) => {
+      const { password } = PasswordConfirm.parse(req.body);
+      if (!req.user!.totp_secret) throw new HttpError(400, 'Two-step sign-in is off.');
+      if (!(await this.users.checkPassword(req.user!, password)))
+        throw new HttpError(400, 'Your password is not right.');
+      return { recoveryCodes: this.users.newRecoveryCodes(req.user!.id) };
+    });
+
+    app.put('/api/auth/policy', { preHandler: this.adminGuard }, async (req) => {
+      const { requireMfa } = SecurityPolicy.parse(req.body);
+      if (requireMfa && !req.user!.totp_secret)
+        throw new HttpError(400, 'Turn on two-step sign-in for your own account first.');
+      setSetting(this.db, 'requireMfa', requireMfa);
+      // Make it count now: whoever is signed in without it has to sign in (and set it up) again.
+      if (requireMfa) {
+        this.db
+          .prepare(
+            'DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE totp_secret IS NULL)',
+          )
+          .run();
+      }
+      return { requireMfa };
     });
   }
 }

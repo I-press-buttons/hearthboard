@@ -13,33 +13,6 @@ afterEach(async () => {
   app = null;
 });
 
-describe('auth', () => {
-  it('sets a PIN once, then requires it for writes', async () => {
-    app = await testApp();
-    expect((await app.inject('GET', '/api/auth/status')).body).toEqual({
-      authenticated: false,
-      pinSet: false,
-    });
-    expect((await app.inject('PUT', '/api/boards/main', {})).status).toBe(401);
-
-    expect((await app.inject('POST', '/api/auth/setup', { pin: '12' })).status).toBe(400);
-    expect((await app.inject('POST', '/api/auth/setup', { pin: '4321' })).status).toBe(200);
-    expect((await app.inject('GET', '/api/auth/status')).body.authenticated).toBe(true);
-    // A second setup is refused.
-    expect((await app.inject('POST', '/api/auth/setup', { pin: '9999' })).status).toBe(409);
-
-    app.logout();
-    expect((await app.inject('POST', '/api/auth/login', { pin: '0000' })).status).toBe(401);
-    expect((await app.inject('POST', '/api/auth/login', { pin: '4321' })).status).toBe(200);
-  });
-
-  it('locks out after repeated wrong PINs', async () => {
-    app = await testApp({ adminPin: '2468' });
-    for (let i = 0; i < 5; i++) await app.inject('POST', '/api/auth/login', { pin: '1111' });
-    expect((await app.inject('POST', '/api/auth/login', { pin: '2468' })).status).toBe(429);
-  });
-});
-
 describe('boards', () => {
   it('creates a default board and broadcasts saved layouts', async () => {
     app = await testApp();

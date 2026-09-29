@@ -55,7 +55,8 @@ Click **Next** and **Done**. Container Manager pulls the image and starts it.
 ## 4. Open it
 
 - **Settings and layout:** `http://<nas-ip>:8080/edit` from a phone or PC. The
-  first visit asks you to choose an admin PIN.
+  first visit asks you to create your sign-in; you become the admin and can add
+  the rest of the family under **Settings → People**.
 - **The wall display:** `http://<nas-ip>:8080/` on the screen that hangs on the
   wall.
 

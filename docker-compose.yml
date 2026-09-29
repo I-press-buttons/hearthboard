@@ -1,5 +1,5 @@
 # Hearthboard on a Synology NAS (Container Manager → Project → Create → paste this).
-# Then open http://<nas-ip>:8080/edit from a phone or PC and choose a PIN.
+# Then open http://<nas-ip>:8080/edit from a phone or PC and create your sign-in.
 services:
   hearthboard:
     image: ghcr.io/i-press-buttons/hearthboard:latest
@@ -18,8 +18,9 @@ services:
       PGID: '100'
       # How often calendars are polled, in seconds.
       HEARTHBOARD_SYNC_INTERVAL: '60'
-      # Optional: set the admin PIN here instead of on first visit.
-      # HEARTHBOARD_PIN: "2468"
+      # Optional: create an "admin" user with this password on first start, instead of
+      # on first visit.
+      # HEARTHBOARD_ADMIN_PASSWORD: "choose a long password"
       # Optional: an HTTPS address that reaches this container (e.g. via DSM's reverse
       # proxy + Let's Encrypt) lets Google sign-in redirect straight back.
       # HEARTHBOARD_PUBLIC_URL: "https://board.example.synology.me"

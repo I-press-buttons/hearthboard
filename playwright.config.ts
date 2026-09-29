@@ -27,7 +27,7 @@ export default defineConfig({
       HEARTHBOARD_DATA: '.e2e-data',
       HEARTHBOARD_PHOTOS: '.e2e-data/none',
       HEARTHBOARD_DEMO: '1',
-      HEARTHBOARD_PIN: '2468',
+      HEARTHBOARD_ADMIN_PASSWORD: 'e2e admin password',
       TZ: 'America/Chicago',
     },
   },

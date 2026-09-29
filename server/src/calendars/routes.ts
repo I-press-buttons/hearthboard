@@ -57,6 +57,8 @@ export function registerCalendarRoutes(
   config: Config,
 ) {
   const guard = { preHandler: auth.guard };
+  // Connecting, removing and recolouring the household's calendars.
+  const admin = { preHandler: auth.adminGuard };
   const pending = new Map<string, PendingGoogle>();
 
   const finishGoogle = async (state: string, codeInput: string, name: string) => {
@@ -76,14 +78,14 @@ export function registerCalendarRoutes(
 
   app.get('/api/calendars', async () => svc.listCalendars());
 
-  app.patch<{ Params: { id: string } }>('/api/calendars/:id', guard, async (req) => {
+  app.patch<{ Params: { id: string } }>('/api/calendars/:id', admin, async (req) => {
     svc.updateCalendar(req.params.id, CalendarPatch.parse(req.body));
     return svc.listCalendars();
   });
 
-  app.get('/api/accounts', guard, async () => svc.listAccounts());
+  app.get('/api/accounts', admin, async () => svc.listAccounts());
 
-  app.post('/api/accounts/caldav', guard, async (req) => {
+  app.post('/api/accounts/caldav', admin, async (req) => {
     const body = CalDavBody.parse(req.body);
     const serverUrl = body.preset === 'icloud' ? ICLOUD_CALDAV_URL : body.serverUrl;
     if (!serverUrl) throw new HttpError(400, 'Enter the CalDAV server URL.');
@@ -94,7 +96,7 @@ export function registerCalendarRoutes(
     });
   });
 
-  app.post('/api/accounts/google/start', guard, async (req) => {
+  app.post('/api/accounts/google/start', admin, async (req) => {
     const body = GoogleStart.parse(req.body);
     const redirectUri = config.publicUrl
       ? `${config.publicUrl}/api/google/callback`
@@ -104,7 +106,7 @@ export function registerCalendarRoutes(
     return { authUrl: googleAuthUrl(body.clientId.trim(), redirectUri, state), state, redirectUri };
   });
 
-  app.post('/api/accounts/google/finish', guard, async (req) => {
+  app.post('/api/accounts/google/finish', admin, async (req) => {
     const body = GoogleFinish.parse(req.body);
     return finishGoogle(body.state, body.code, body.name);
   });
@@ -113,7 +115,7 @@ export function registerCalendarRoutes(
   app.get<{ Querystring: { state?: string; code?: string; error?: string } }>(
     '/api/google/callback',
     async (req, reply) => {
-      if (!auth.isAuthenticated(req)) return reply.redirect('/settings?google=login');
+      if (!auth.isAdmin(req)) return reply.redirect('/settings?google=login');
       if (req.query.error || !req.query.state || !req.query.code) {
         return reply.redirect(
           `/settings?google=${encodeURIComponent(req.query.error ?? 'failed')}`,
@@ -128,17 +130,17 @@ export function registerCalendarRoutes(
     },
   );
 
-  app.delete<{ Params: { id: string } }>('/api/accounts/:id', guard, async (req) => {
+  app.delete<{ Params: { id: string } }>('/api/accounts/:id', admin, async (req) => {
     svc.removeAccount(req.params.id);
     return { ok: true };
   });
 
-  app.post<{ Params: { id: string } }>('/api/accounts/:id/sync', guard, async (req) => {
+  app.post<{ Params: { id: string } }>('/api/accounts/:id/sync', admin, async (req) => {
     await svc.syncAccount(req.params.id);
     return svc.listAccounts().find((a) => a.id === req.params.id) ?? null;
   });
 
-  app.post('/api/sync', guard, async () => {
+  app.post('/api/sync', admin, async () => {
     await svc.syncAll();
     return svc.listAccounts();
   });

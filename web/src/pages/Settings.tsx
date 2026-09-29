@@ -1,7 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import type { AccountDTO, CalendarDTO, ChecklistDTO } from '@hearthboard/shared';
 import { api } from '../api';
+import { useMe } from '../components/Auth';
+import { Card, useAction } from '../components/Card';
 import { Modal, TopBar } from '../components/TopBar';
+import { AccountCard } from './settings/Account';
+import { PeopleCard } from './settings/People';
 import { useLiveQuery } from '../live';
 
 function ago(ts: number | null) {
@@ -11,35 +15,6 @@ function ago(ts: number | null) {
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
   return new Date(ts).toLocaleString();
-}
-
-function useAction() {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const run = async (fn: () => Promise<unknown>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await fn();
-      return true;
-    } catch (e) {
-      setError((e as Error).message);
-      return false;
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { busy, error, run, setError };
-}
-
-function Card({ title, hint, children }: { title: string; hint?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="card">
-      <h2>{title}</h2>
-      {hint && <p className="hint">{hint}</p>}
-      {children}
-    </section>
-  );
 }
 
 // ---------------- calendars ----------------
@@ -736,65 +711,21 @@ function QuotesCard() {
   );
 }
 
-// ---------------- security ----------------
-
-function SecurityCard() {
-  const [pin, setPin] = useState('');
-  const { busy, error, run } = useAction();
-  const [done, setDone] = useState(false);
-  return (
-    <Card
-      title="Admin PIN"
-      hint="Anyone on your network can view the board. Editing and connecting accounts needs this PIN."
-    >
-      <form
-        className="row"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          setDone(false);
-          if (await run(() => api.post('/api/auth/pin', { pin }))) {
-            setPin('');
-            setDone(true);
-          }
-        }}
-      >
-        <input
-          className="grow"
-          type="password"
-          inputMode="numeric"
-          placeholder="New PIN (4–12 digits)"
-          value={pin}
-          onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-        />
-        <button className="btn" disabled={busy || pin.length < 4}>
-          Change PIN
-        </button>
-        <button
-          type="button"
-          className="btn ghost"
-          onClick={() => void api.post('/api/auth/logout').then(() => location.assign('/'))}
-        >
-          Log out
-        </button>
-      </form>
-      {error && <div className="error-text">{error}</div>}
-      {done && <div className="status-ok">PIN changed.</div>}
-    </Card>
-  );
-}
-
 export function Settings() {
+  const { user } = useMe();
+  const admin = user.role === 'admin';
   return (
     <div className="app">
       <TopBar active="settings" />
       <div className="page">
         <div className="page-inner">
-          <CalendarsCard />
-          <RemindersCard />
-          <PhotosCard />
+          <AccountCard />
+          {admin && <PeopleCard />}
+          {admin && <CalendarsCard />}
+          {admin && <RemindersCard />}
+          {admin && <PhotosCard />}
           <ChecklistsCard />
           <QuotesCard />
-          <SecurityCard />
         </div>
       </div>
     </div>

@@ -170,12 +170,12 @@ export class Reminders {
       },
     );
 
-    app.get('/api/reminders/setup', { preHandler: auth.guard }, async () => ({
+    app.get('/api/reminders/setup', { preHandler: auth.adminGuard }, async () => ({
       token: auth.ingestToken(),
       lastIngest: getSetting<number>(this.db, 'remindersLastIngest') ?? null,
     }));
 
-    app.post('/api/reminders/token', { preHandler: auth.guard }, async () => ({
+    app.post('/api/reminders/token', { preHandler: auth.adminGuard }, async () => ({
       token: auth.rotateIngestToken(),
     }));
   }
