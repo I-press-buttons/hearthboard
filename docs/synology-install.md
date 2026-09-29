@@ -78,7 +78,11 @@ In **Settings** (`/settings`):
 - **Synology Photos albums (optional):** the mounted folder works without any
   setup. To show one specific album, enter a DSM account in the Photos section.
   Use a separate DSM user without 2-factor sign-in, and share the albums with
-  it.
+  it. Enter DSM's secure address, `https://<nas-ip>:5001`, so the password is
+  encrypted on its way to the NAS. If DSM uses its own (self-signed)
+  certificate, tick **Allow self-signed HTTPS certificate**. Hearthboard warns
+  you if the address starts with `http://` (usually port 5000), which sends the
+  password unencrypted across your network.
 
 Then go to **Layout** (`/edit`), drag widgets where you want them, and resize
 them from their edges. The wall display updates immediately.

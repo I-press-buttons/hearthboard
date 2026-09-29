@@ -72,6 +72,19 @@ const PALETTE = [
 ];
 const DAY = 86_400_000;
 const CALENDAR_LIST_REFRESH_MS = 15 * 60_000;
+/** The longest an account that keeps failing waits between automatic tries. */
+const MAX_BACKOFF_MS = 6 * 60 * 60_000;
+const SIGN_IN_PAUSED =
+  "Hearthboard stopped trying so your account doesn't get locked. If the password changed, remove the account and connect it again. Otherwise, press Sync now to try once more.";
+
+/** What we remember about an account that failed to sync. Lost on restart, which is fine. */
+interface Trouble {
+  failures: number;
+  /** Timer syncs skip the account until then. */
+  nextAttemptAt: number;
+  /** Sign-in failed: no automatic tries at all, only "Sync now". */
+  paused: boolean;
+}
 
 /** Whoever is asking: a signed-in person, or null (a wall display that isn't signed in). */
 export type Viewer = { role: Role } | null;
@@ -111,6 +124,8 @@ export class CalendarService {
   private providers = new Map<string, CalendarProvider>();
   private running = new Map<string, Promise<void>>();
   private listRefreshed = new Map<string, number>();
+  private trouble = new Map<string, Trouble>();
+  private intervalMs = 60_000;
   private expansions = new Map<string, { key: string; occ: Occurrence[] }>();
   private timer: NodeJS.Timeout | null = null;
 
@@ -132,6 +147,8 @@ export class CalendarService {
         status: a.status,
         lastError: a.last_error,
         lastSync: a.last_sync,
+        paused: !!this.trouble.get(a.id)?.paused,
+        nextRetryAt: this.retryAt(a.id),
       }),
     );
   }
@@ -180,6 +197,7 @@ export class CalendarService {
   removeAccount(id: string) {
     this.db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
     this.providers.delete(id);
+    this.trouble.delete(id);
     this.expansions.clear();
     this.live.publish('calendars');
     this.live.publish('events');
@@ -276,6 +294,7 @@ export class CalendarService {
 
   start(intervalSec: number) {
     this.stop();
+    this.intervalMs = intervalSec * 1000;
     const tick = () => void this.syncAll();
     tick();
     this.timer = setInterval(tick, intervalSec * 1000);
@@ -283,6 +302,7 @@ export class CalendarService {
 
   /** Change the polling interval if polling is running. */
   reschedule(intervalSec: number) {
+    this.intervalMs = intervalSec * 1000;
     if (!this.timer) return;
     clearInterval(this.timer);
     this.timer = setInterval(() => void this.syncAll(), intervalSec * 1000);
@@ -293,20 +313,23 @@ export class CalendarService {
     this.timer = null;
   }
 
-  async syncAll() {
+  /** Sync every account. The timer calls it plain; "Sync now" passes `force`. */
+  async syncAll(force = false) {
     const ids = (this.db.prepare('SELECT id FROM accounts').all() as { id: string }[]).map(
       (r) => r.id,
     );
-    await Promise.all(ids.map((id) => this.syncAccount(id)));
+    await Promise.all(ids.map((id) => this.syncAccount(id, force)));
   }
 
   /**
    * Sync one account; concurrent calls share the in-flight run. `force` (Sync now) skips
-   * provider-side throttling, e.g. calendar feeds that are only downloaded every 15 minutes.
+   * provider-side throttling, e.g. calendar feeds that are only downloaded every 15 minutes,
+   * and tries even when the account is backing off or paused after a failure.
    */
   syncAccount(accountId: string, force = false): Promise<void> {
     const inflight = this.running.get(accountId);
     if (inflight) return inflight;
+    if (!force && this.holdOff(accountId)) return Promise.resolve();
     const run = this.doSyncAccount(accountId, force).finally(() => this.running.delete(accountId));
     this.running.set(accountId, run);
     return run;
@@ -324,15 +347,47 @@ export class CalendarService {
         .prepare('SELECT * FROM calendars WHERE account_id = ? AND enabled = 1')
         .all(accountId) as CalendarRow[];
       for (const cal of cals) changed = (await this.syncCalendar(cal, force)) || changed;
+      this.trouble.delete(accountId);
       this.setStatus(accountId, 'ok', null);
     } catch (err) {
       if (err instanceof AuthError) this.providers.delete(accountId);
-      this.setStatus(accountId, 'error', errorMessage(err));
+      this.setStatus(accountId, 'error', this.recordFailure(accountId, err), true);
     }
     if (changed) this.live.publish('events');
   }
 
-  private setStatus(accountId: string, status: AccountRow['status'], error: string | null) {
+  /** True while timer syncs should leave an account alone: paused, or waiting out a back-off. */
+  private holdOff(accountId: string): boolean {
+    const t = this.trouble.get(accountId);
+    return !!t && (t.paused || Date.now() < t.nextAttemptAt);
+  }
+
+  /** When the next automatic try is due, or null if there is no wait (or it's paused). */
+  private retryAt(accountId: string): number | null {
+    const t = this.trouble.get(accountId);
+    return t && !t.paused ? t.nextAttemptAt : null;
+  }
+
+  /**
+   * Remember a failed sync and return the message to show. Each failure doubles the wait
+   * before the next automatic try. A failed sign-in stops automatic tries altogether:
+   * repeating a wrong password is how accounts get locked, or the NAS blocks its own IP.
+   */
+  private recordFailure(accountId: string, err: unknown): string {
+    const failures = (this.trouble.get(accountId)?.failures ?? 0) + 1;
+    const wait = Math.min(this.intervalMs * 2 ** (failures - 1), MAX_BACKOFF_MS);
+    const paused = err instanceof AuthError;
+    this.trouble.set(accountId, { failures, nextAttemptAt: Date.now() + wait, paused });
+    const why = errorMessage(err);
+    return paused ? `Sign-in failed. ${why.replace(/[.\s]+$/, '')}. ${SIGN_IN_PAUSED}` : why;
+  }
+
+  private setStatus(
+    accountId: string,
+    status: AccountRow['status'],
+    error: string | null,
+    retryChanged = false,
+  ) {
     const prev = this.db
       .prepare('SELECT status, last_error FROM accounts WHERE id = ?')
       .get(accountId) as Pick<AccountRow, 'status' | 'last_error'> | undefined;
@@ -340,7 +395,8 @@ export class CalendarService {
     this.db
       .prepare('UPDATE accounts SET status = ?, last_error = ?, last_sync = ? WHERE id = ?')
       .run(status, error, status === 'ok' ? Date.now() : null, accountId);
-    if (prev.status !== status || prev.last_error !== error) this.live.publish('calendars');
+    if (retryChanged || prev.status !== status || prev.last_error !== error)
+      this.live.publish('calendars');
   }
 
   /** Pull remote changes for one calendar into the cache. Returns true if anything changed. */

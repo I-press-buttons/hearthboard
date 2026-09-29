@@ -224,6 +224,25 @@ describe('GoogleProvider', () => {
     });
   });
 
+  it("treats Google's rate limits as a passing problem, not a failed sign-in", async () => {
+    const limited = (reason: string) =>
+      fakeGoogle(() => ({
+        status: 403,
+        json: { error: { code: 403, message: 'Rate Limit Exceeded', errors: [{ reason }] } },
+      })).f;
+    for (const reason of ['rateLimitExceeded', 'userRateLimitExceeded', 'quotaExceeded']) {
+      const err = await new GoogleProvider(secret, limited(reason)).listCalendars().catch((e) => e);
+      expect(err, reason).toBeInstanceOf(Error);
+      expect(err, reason).not.toBeInstanceOf(AuthError);
+    }
+    // Really not allowed: that one is about access.
+    const denied = fakeGoogle(() => ({
+      status: 403,
+      json: { error: { code: 403, message: 'Forbidden', errors: [{ reason: 'forbidden' }] } },
+    })).f;
+    await expect(new GoogleProvider(secret, denied).listCalendars()).rejects.toThrow(AuthError);
+  });
+
   it('reports a revoked refresh token clearly', async () => {
     const f = (async () =>
       new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })) as typeof fetch;

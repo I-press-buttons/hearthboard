@@ -5,7 +5,7 @@ import { EventDelete, EventInput, EventPatch } from '@hearthboard/shared';
 import type { Auth } from '../auth';
 import type { DisplayGuard } from '../displays';
 import type { SystemSettings } from '../system';
-import { HttpError } from '../util';
+import { HttpError, httpUrl } from '../util';
 import { ICLOUD_CALDAV_URL } from './caldav';
 import { normalizeFeedUrl } from './feed';
 import {
@@ -19,7 +19,8 @@ import type { CalendarService } from './service';
 const CalDavBody = z.object({
   name: z.string().min(1).max(100).default('iCloud'),
   preset: z.enum(['icloud', 'custom']).default('icloud'),
-  serverUrl: z.string().url().optional(),
+  // The dialog sends the field empty for iCloud, which has its own address.
+  serverUrl: z.preprocess((v) => (v === '' ? undefined : v), httpUrl().optional()),
   username: z.string().min(1),
   password: z.string().min(1),
 });
@@ -168,7 +169,7 @@ export function registerCalendarRoutes(
   });
 
   app.post('/api/sync', admin, async () => {
-    await svc.syncAll();
+    await svc.syncAll(true);
     return svc.listAccounts();
   });
 

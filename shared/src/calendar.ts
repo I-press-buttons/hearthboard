@@ -10,6 +10,10 @@ export interface AccountDTO {
   status: 'ok' | 'error' | 'syncing';
   lastError: string | null;
   lastSync: number | null;
+  /** Sign-in failed, so automatic syncing is off until someone presses "Sync now". */
+  paused: boolean;
+  /** When the next automatic try happens after a failure (ms since epoch); null when not waiting. */
+  nextRetryAt: number | null;
 }
 
 export interface CalendarDTO {
