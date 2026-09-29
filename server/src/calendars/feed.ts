@@ -24,6 +24,26 @@ export interface FeedSecret {
 /** Feeds rarely change; download at most this often (the Sync now button always downloads). */
 export const FEED_REFRESH_MS = 15 * 60_000;
 const MAX_BYTES = 20 * 1024 * 1024;
+const TOO_LARGE = 'That calendar feed is too large.';
+
+/** The body as text, stopping as soon as it passes `max` bytes instead of buffering it all. */
+async function readText(res: Response, max: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return '';
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel();
+      throw new Error(TOO_LARGE);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
 const REMOTE_ID = 'feed';
 const PRODID = '-//Hearthboard//Calendar feed//EN';
 const NOT_A_CALENDAR = "That address didn't return a calendar (.ics) file.";
@@ -194,9 +214,8 @@ export class IcsFeedProvider implements CalendarProvider {
       throw new Error(`The calendar feed isn't available (HTTP ${res.status}). Check the address.`);
     if (!res.ok) throw new Error(`Couldn't download the calendar feed: HTTP ${res.status}`);
     const length = Number(res.headers.get('content-length'));
-    if (length > MAX_BYTES) throw new Error('That calendar feed is too large.');
-    const body = await res.text();
-    if (body.length > MAX_BYTES) throw new Error('That calendar feed is too large.');
+    if (length > MAX_BYTES) throw new Error(TOO_LARGE);
+    const body = await readText(res, MAX_BYTES);
     if (!/BEGIN:VCALENDAR/i.test(body)) throw new Error(NOT_A_CALENDAR);
     this.last = {
       at: Date.now(),

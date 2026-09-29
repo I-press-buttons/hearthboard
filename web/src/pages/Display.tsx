@@ -82,7 +82,7 @@ export function Display() {
   const homeId = new URLSearchParams(location.search).get('board') || 'main';
   const { data: home, error } = useLiveQuery(
     ['board'],
-    () => api.get<Board>(`/api/boards/${homeId}`),
+    () => api.get<Board>(`/api/boards/${encodeURIComponent(homeId)}`),
     [homeId],
   );
   const connected = useLiveStatus();

@@ -112,11 +112,9 @@ export class Auth {
 
   checkIngestToken(header: string | undefined): boolean {
     const given = header?.replace(/^Bearer\s+/i, '').trim() ?? '';
-    const expected = this.ingestToken();
-    return (
-      given.length === expected.length &&
-      crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))
-    );
+    // Compare hashes: equal-length digests, however many bytes the given token has.
+    const digest = (s: string) => crypto.createHash('sha256').update(s).digest();
+    return crypto.timingSafeEqual(digest(given), digest(this.ingestToken()));
   }
 
   // ---------------- sessions ----------------

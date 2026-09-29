@@ -4,7 +4,9 @@ import sharp from 'sharp';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { LiveMessage } from '@hearthboard/shared';
 import { DemoProvider } from '../src/calendars/demo';
-import { jpeg, testApp } from './helpers';
+import { buildApp } from '../src/app';
+import { loadConfig } from '../src/config';
+import { jpeg, testApp, testClient, tmpDir } from './helpers';
 
 type App = Awaited<ReturnType<typeof testApp>>;
 let app: App | null = null;
@@ -137,6 +139,50 @@ describe('checklists', () => {
   });
 });
 
+describe('request hardening', () => {
+  it('refuses changes posted from other sites, but not from the app or a Shortcut', async () => {
+    app = await testApp();
+    await app.login();
+    const post = (site?: string) =>
+      app!.inject(
+        'POST',
+        '/api/checklists',
+        { name: 'Groceries' },
+        site ? { 'sec-fetch-site': site } : {},
+      );
+    expect((await post('cross-site')).status).toBe(403);
+    expect((await post('same-site')).status).toBe(403); // e.g. another app on the NAS
+    expect((await post('same-origin')).status).toBe(200);
+    expect((await post()).status).toBe(200); // older browsers, iPhone Shortcuts
+    // Reading is fine from anywhere (a display in an iframe, a link).
+    const read = await app.inject('GET', '/api/checklists', undefined, {
+      'sec-fetch-site': 'cross-site',
+    });
+    expect(read.status).toBe(200);
+    expect(read.raw.headers['x-content-type-options']).toBe('nosniff');
+    expect(read.raw.headers['referrer-policy']).toBe('same-origin');
+  });
+
+  it('keeps internal error details from people who are not signed in', async () => {
+    const dataDir = tmpDir();
+    const ctx = await buildApp({ ...loadConfig({}), dataDir }, { background: false });
+    ctx.app.get('/api/test-boom', async () => {
+      throw new Error('SQLITE_CORRUPT at /data/hearthboard.db');
+    });
+    ctx.app.get('/api/test-boom-signed-in', { preHandler: ctx.auth.guard }, async () => {
+      throw new Error('Upstream said no');
+    });
+    await ctx.app.ready();
+    app = { ...ctx, ...testClient(ctx.app) } as unknown as App;
+    const out = await app.inject('GET', '/api/test-boom');
+    expect(out).toMatchObject({ status: 502, body: { error: 'Something went wrong' } });
+    await app.login();
+    expect((await app.inject('GET', '/api/test-boom-signed-in')).body.error).toBe(
+      'Upstream said no',
+    );
+  });
+});
+
 describe('reminders ingest', () => {
   it('requires the token and accepts loose Shortcuts payloads', async () => {
     app = await testApp();
@@ -146,6 +192,9 @@ describe('reminders ingest', () => {
       (await app.inject('POST', '/api/reminders/ingest', [], { authorization: 'Bearer nope' }))
         .status,
     ).toBe(401);
+    // A token with multi-byte characters is simply wrong, not a server error.
+    const accented = { authorization: `Bearer ${'é'.repeat(token.length)}` };
+    expect((await app.inject('POST', '/api/reminders/ingest', [], accented)).status).toBe(401);
     // Only in the header: a token in the URL would end up in the request log.
     expect((await app.inject('POST', `/api/reminders/ingest?token=${token}`, [])).status).toBe(401);
 

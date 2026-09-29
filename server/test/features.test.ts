@@ -366,6 +366,21 @@ END:VEVENT
     expect(edit.status).toBe(403);
   });
 
+  it('stops downloading a feed as soon as it is too large', async () => {
+    let sent = 0;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(c) {
+        sent += 1 << 20;
+        c.enqueue(new Uint8Array(1 << 20).fill(65));
+      },
+    });
+    // No content-length: the size only shows while reading.
+    const f = (async () => new Response(endless, { status: 200 })) as typeof fetch;
+    const feed = new IcsFeedProvider({ url: 'https://example.com/big.ics' }, f);
+    await expect(feed.listCalendars()).rejects.toThrow(/too large/);
+    expect(sent).toBeLessThan(25 << 20);
+  });
+
   it('reports addresses that are not calendars', async () => {
     const f = (async () => new Response('<html>Login</html>', { status: 200 })) as typeof fetch;
     app = await testApp(
