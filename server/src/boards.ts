@@ -10,6 +10,7 @@ import {
 import type { DB } from './db';
 import type { LiveHub } from './live';
 import type { Auth } from './auth';
+import type { DisplayGuard } from './displays';
 import type { UserRow } from './users';
 import { HttpError } from './util';
 
@@ -135,16 +136,20 @@ export class Boards {
     }
   }
 
-  register(app: FastifyInstance, auth: Auth) {
+  register(app: FastifyInstance, auth: Auth, display: DisplayGuard) {
     const signedIn = { preHandler: auth.guard };
 
     app.get('/api/boards', signedIn, async (req) => this.list(req.user!));
 
-    // Public, like the rest of the display: TVs show a board without signing in.
-    app.get<{ Params: { id: string } }>('/api/boards/:id', async (req, reply) => {
-      const board = this.get(req.params.id);
-      return board ?? reply.code(404).send({ error: 'No such board' });
-    });
+    // For anyone signed in and for paired screens: TVs show a board without signing in.
+    app.get<{ Params: { id: string } }>(
+      '/api/boards/:id',
+      { preHandler: display },
+      async (req, reply) => {
+        const board = this.get(req.params.id);
+        return board ?? reply.code(404).send({ error: 'No such board' });
+      },
+    );
 
     app.put<{ Params: { id: string } }>('/api/boards/:id', signedIn, async (req) => {
       this.checkAccess(req.user!, req.params.id);

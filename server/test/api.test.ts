@@ -88,6 +88,7 @@ describe('general settings', () => {
 describe('boards', () => {
   it('creates a default board and broadcasts saved layouts', async () => {
     app = await testApp();
+    await app.login();
     const board = (await app.inject('GET', '/api/boards/main')).body;
     expect(board.widgets.map((w: { type: string }) => w.type).sort()).toEqual([
       'calendar',
@@ -99,7 +100,6 @@ describe('boards', () => {
     ]);
     const seen: LiveMessage[] = [];
     app.live.subscribe((m) => seen.push(m));
-    await app.login();
     board.widgets[0].x = 3;
     const res = await app.inject('PUT', '/api/boards/main', board);
     expect(res.status).toBe(200);
@@ -140,6 +140,7 @@ describe('checklists', () => {
 describe('reminders ingest', () => {
   it('requires the token and accepts loose Shortcuts payloads', async () => {
     app = await testApp();
+    await app.login();
     const token = app.auth.ingestToken();
     expect((await app.inject('POST', '/api/reminders/ingest', [])).status).toBe(401);
     expect(
@@ -172,6 +173,7 @@ describe('reminders ingest', () => {
 
   it('hands board ticks back to the Shortcut until the phone reports them done', async () => {
     app = await testApp();
+    await app.login();
     const auth = { authorization: `Bearer ${app.auth.ingestToken()}` };
     const payload = {
       reminders: [
@@ -182,7 +184,6 @@ describe('reminders ingest', () => {
     await app.inject('POST', '/api/reminders/ingest', payload, auth);
     const [first] = (await app.inject('GET', '/api/reminders')).body;
 
-    await app.login();
     expect(
       (await app.inject('POST', `/api/reminders/${first.id}/complete`, { done: true })).status,
     ).toBe(200);
@@ -237,6 +238,7 @@ describe('quotes', () => {
 describe('photos (folder source)', () => {
   it('skips Synology metadata folders and serves HEIC via the @eaDir preview', async () => {
     app = await testApp();
+    await app.login();
     const root = app.config.photosDir;
     await jpeg(path.join(root, 'Trips', 'beach.jpg'), 800, 600);
     await jpeg(path.join(root, '@eaDir', 'junk.jpg'));
@@ -269,6 +271,7 @@ describe('photos (folder source)', () => {
 
   it('refuses paths outside the photo folder', async () => {
     app = await testApp();
+    await app.login();
     const id = 'f.' + Buffer.from(JSON.stringify('../hearthboard.db')).toString('base64url');
     expect((await app.inject('GET', `/api/photos/img/${id}`)).status).toBe(404);
   });

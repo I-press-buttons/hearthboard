@@ -29,28 +29,50 @@ export async function testApp(overrides: Partial<Config> = {}, opts: BuildOption
   const ctx = await buildApp(config, { background: false, ...opts });
   await ctx.app.ready();
   const client = () => testClient(ctx.app);
-  return { ...ctx, config, client, ...client() };
+  /**
+   * A wall display an admin has paired, using a pairing link: a browser of its own that holds
+   * the display cookie and no sign-in.
+   */
+  const display = async (name = 'Test TV') => {
+    const admin = client();
+    await admin.login();
+    const made = await admin.inject('POST', '/api/displays', { name });
+    const tv = client();
+    const token = new URL(made.body.url).hash.replace('#token=', '');
+    const claimed = await tv.inject('POST', '/api/displays/claim', { token });
+    if (claimed.status !== 200)
+      throw new Error(`Could not pair the test display: ${claimed.raw.body}`);
+    return tv;
+  };
+  return { ...ctx, config, client, display, ...client() };
 }
 
 export const ADMIN = { username: 'admin', name: 'Admin', password: 'correct horse' };
 
 /** A browser: its own cookie jar, signed in as one user at a time. */
 export function testClient(app: FastifyInstance) {
-  let cookie = '';
+  const jar = new Map<string, string>();
   const inject = async (
     method: string,
     url: string,
     body?: unknown,
     headers: Record<string, string> = {},
   ) => {
+    const cookie = cookieHeader();
     const res = await app.inject({
       method: method as 'GET',
       url,
       payload: body === undefined ? undefined : (body as object),
       headers: { ...(cookie ? { cookie } : {}), ...headers },
     });
-    const set = res.headers['set-cookie'];
-    if (set) cookie = (Array.isArray(set) ? set[0] : set).split(';')[0];
+    for (const line of [res.headers['set-cookie']].flat()) {
+      if (!line) continue;
+      const [pair] = line.split(';');
+      const eq = pair.indexOf('=');
+      // An empty value is the server clearing the cookie.
+      if (pair.slice(eq + 1)) jar.set(pair.slice(0, eq), pair.slice(eq + 1));
+      else jar.delete(pair.slice(0, eq));
+    }
     return { status: res.statusCode, body: res.body ? safeJson(res.body) : null, raw: res };
   };
   /** Sign in as the admin, creating it on first use. */
@@ -60,10 +82,10 @@ export function testClient(app: FastifyInstance) {
   };
   const signIn = (username: string, password: string) =>
     inject('POST', '/api/auth/login', { username, password });
-  const logout = () => {
-    cookie = '';
-  };
-  return { inject, login, signIn, logout };
+  const logout = () => jar.clear();
+  /** The Cookie header this browser would send, for requests made some other way. */
+  const cookieHeader = () => [...jar].map(([name, value]) => `${name}=${value}`).join('; ');
+  return { inject, login, signIn, logout, cookieHeader };
 }
 
 function safeJson(s: string) {

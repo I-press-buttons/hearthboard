@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { EventDelete, EventInput, EventPatch } from '@hearthboard/shared';
 import type { Auth } from '../auth';
+import type { DisplayGuard } from '../displays';
 import type { SystemSettings } from '../system';
 import { HttpError } from '../util';
 import { ICLOUD_CALDAV_URL } from './caldav';
@@ -62,6 +63,7 @@ export function registerCalendarRoutes(
   svc: CalendarService,
   auth: Auth,
   system: SystemSettings,
+  display: DisplayGuard,
 ) {
   const guard = { preHandler: auth.guard };
   // Connecting, removing and recolouring the household's calendars.
@@ -83,7 +85,7 @@ export function registerCalendarRoutes(
     });
   };
 
-  app.get('/api/calendars', async () => svc.listCalendars());
+  app.get('/api/calendars', { preHandler: display }, async () => svc.listCalendars());
 
   app.patch<{ Params: { id: string } }>('/api/calendars/:id', admin, async (req) => {
     svc.updateCalendar(req.params.id, CalendarPatch.parse(req.body));
@@ -169,6 +171,7 @@ export function registerCalendarRoutes(
 
   app.get<{ Querystring: { start?: string; end?: string; calendars?: string } }>(
     '/api/events',
+    { preHandler: display },
     async (req) => {
       const start = new Date(req.query.start ?? Date.now());
       const end = new Date(req.query.end ?? start.getTime() + 7 * 86_400_000);

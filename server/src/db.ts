@@ -150,6 +150,23 @@ export const MIGRATIONS: (string | ((db: DB) => void))[] = [
     expires_at INTEGER
   );
   `,
+
+  // Paired screens. A screen waiting for approval is a row with a code (approved = 0); one made
+  // with a pairing link has a claim_hash instead until the link is opened. Tokens are stored
+  // hashed, like sessions.
+  `
+  CREATE TABLE displays (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT UNIQUE,
+    claim_hash TEXT UNIQUE,
+    created_at INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    approved INTEGER NOT NULL DEFAULT 0,
+    code TEXT UNIQUE,
+    expires_at INTEGER
+  );
+  `,
 ];
 
 export function openDb(file: string): DB {

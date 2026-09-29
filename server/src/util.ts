@@ -10,6 +10,11 @@ export function shortHash(...parts: string[]): string {
   return crypto.createHash('sha1').update(parts.join('\u0000')).digest('hex').slice(0, 16);
 }
 
+/** How session and display tokens are stored: only the hash is kept. */
+export function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

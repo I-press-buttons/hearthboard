@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { IngestPayload, IngestReminder, normalizeDue, type ReminderDTO } from '@hearthboard/shared';
 import type { Auth } from './auth';
+import type { DisplayGuard } from './displays';
 import type { TouchGate } from './boards';
 import { getSetting, setSetting, type DB } from './db';
 import type { LiveHub } from './live';
@@ -147,7 +148,12 @@ export class Reminders {
     return true;
   }
 
-  register(app: FastifyInstance, auth: Auth, touch: TouchGate = () => false) {
+  register(
+    app: FastifyInstance,
+    auth: Auth,
+    display: DisplayGuard,
+    touch: TouchGate = () => false,
+  ) {
     app.post<{ Querystring: { token?: string } }>('/api/reminders/ingest', async (req, reply) => {
       const header =
         req.headers.authorization ?? (req.query.token ? `Bearer ${req.query.token}` : undefined);
@@ -156,11 +162,13 @@ export class Reminders {
       return { ok: true, ...this.ingest(req.body) };
     });
 
-    app.get<{ Querystring: { lists?: string } }>('/api/reminders', async (req) =>
-      this.list(req.query.lists?.split(',').filter(Boolean)),
+    app.get<{ Querystring: { lists?: string } }>(
+      '/api/reminders',
+      { preHandler: display },
+      async (req) => this.list(req.query.lists?.split(',').filter(Boolean)),
     );
 
-    app.get('/api/reminders/lists', async () => this.lists());
+    app.get('/api/reminders/lists', { preHandler: display }, async () => this.lists());
 
     app.post<{ Params: { id: string }; Body: { done?: boolean } }>(
       '/api/reminders/:id/complete',

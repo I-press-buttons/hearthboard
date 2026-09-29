@@ -74,14 +74,15 @@ describe('weather', () => {
     expect(demoForecast().daily).toHaveLength(8);
   });
 
-  it('is public, shared between screens and cached', async () => {
+  it('is shared between screens and cached', async () => {
     const { f, calls } = fakeFetch(() => Response.json(OPEN_METEO));
     app = await testApp({}, { weatherFetch: f });
-    const a = await app.inject('GET', '/api/weather?lat=30.27&lon=-97.74');
+    const tv = await app.display();
+    const a = await tv.inject('GET', '/api/weather?lat=30.27&lon=-97.74');
     expect(a.status).toBe(200);
     expect(a.body.current.temp).toBe(18.4);
     expect(a.body.stale).toBe(false);
-    await app.inject('GET', '/api/weather?lat=30.271&lon=-97.742');
+    await (await app.display('Kitchen')).inject('GET', '/api/weather?lat=30.271&lon=-97.742');
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain('latitude=30.270');
     expect(calls[0]).toContain('timezone=auto');
@@ -102,7 +103,7 @@ describe('weather', () => {
     await expect(app.weather.forecast(5, 5, now)).rejects.toThrow(/unavailable/);
   });
 
-  it('rejects bad coordinates and needs a sign-in to look places up', async () => {
+  it('rejects bad coordinates and needs a sign-in to look places up, even for a paired screen', async () => {
     const { f } = fakeFetch((url) =>
       url.includes('geocoding')
         ? Response.json({
@@ -119,8 +120,9 @@ describe('weather', () => {
         : Response.json(OPEN_METEO),
     );
     app = await testApp({}, { weatherFetch: f });
-    expect((await app.inject('GET', '/api/weather?lat=91&lon=0')).status).toBe(400);
-    expect((await app.inject('GET', '/api/weather/places?q=Austin')).status).toBe(401);
+    const tv = await app.display();
+    expect((await tv.inject('GET', '/api/weather?lat=91&lon=0')).status).toBe(400);
+    expect((await tv.inject('GET', '/api/weather/places?q=Austin')).status).toBe(401);
     await app.login();
     expect((await app.inject('GET', '/api/weather/places?q=Austin')).body).toEqual([
       { name: 'Austin', region: 'Texas, United States', latitude: 30.27, longitude: -97.74 },
@@ -177,9 +179,9 @@ describe('family notes', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ text: 'Back at 6', color: 'blue', author: 'Admin' });
     await app.inject('POST', '/api/notes', { text: 'Forever', expiresInHours: null });
-    const anon = app.client();
+    const tv = await app.display();
     expect(
-      (await anon.inject('GET', '/api/notes')).body.map((n: { text: string }) => n.text),
+      (await tv.inject('GET', '/api/notes')).body.map((n: { text: string }) => n.text),
     ).toEqual(['Forever', 'Back at 6']);
     // An hour later the first one is gone.
     const later = Date.now() + 3600_000 + 1000;
@@ -385,11 +387,12 @@ END:VEVENT
 describe('touch-screen mode', () => {
   it('lets a touch-screen board tick its own checklists and reminders, and nothing else', async () => {
     app = await testApp();
+    await app.login();
     const board = (await app.inject('GET', '/api/boards/main')).body;
     const list = board.widgets.find((w: { type: string }) => w.type === 'checklist').config
       .checklistId as string;
     const item = (await app.inject('GET', `/api/checklists/${list}`)).body.items[0];
-    const tv = app.client();
+    const tv = await app.display(); // a paired screen, not signed in
     const tick = (headers: Record<string, string>, body: unknown = { done: true }) =>
       tv.inject('PATCH', `/api/checklists/${list}/items/${item.id}`, body, headers);
     const onMain = { 'x-hearthboard-board': 'main' };
@@ -397,7 +400,6 @@ describe('touch-screen mode', () => {
     expect((await tick({})).status).toBe(401);
     expect((await tick(onMain)).status).toBe(401); // touch mode is off
 
-    await app.login();
     await app.inject('PUT', '/api/boards/main', { ...board, interactive: true });
     expect((await tick(onMain)).status).toBe(200);
     expect((await app.inject('GET', `/api/checklists/${list}`)).body.items[0].done).toBe(true);

@@ -364,11 +364,11 @@ describe('boards per person', () => {
     const all = (await app.inject('GET', '/api/boards')).body;
     expect(all.map((b: { ownerName: string }) => b.ownerName)).toEqual(['Admin', 'Sam']);
 
-    // Sam can't touch the admin's board, but the display still shows it to anyone.
+    // Sam can't touch the admin's board, but a paired display still shows it.
     const main = (await app.inject('GET', '/api/boards/main')).body;
     expect((await samClient.inject('PUT', '/api/boards/main', main)).status).toBe(403);
     expect((await samClient.inject('DELETE', '/api/boards/main')).status).toBe(403);
-    expect((await app.client().inject('GET', '/api/boards/main')).status).toBe(200);
+    expect((await (await app.display()).inject('GET', '/api/boards/main')).status).toBe(200);
     expect((await samClient.inject('PUT', '/api/boards/nope', main)).status).toBe(404);
 
     // Sam's own board is Sam's to change; so is the admin's to help with.

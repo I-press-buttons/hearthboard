@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { NoteInput, type NoteColor, type NoteDTO } from '@hearthboard/shared';
 import type { Auth } from './auth';
+import type { DisplayGuard } from './displays';
 import type { DB } from './db';
 import type { LiveHub } from './live';
 import { HttpError } from './util';
@@ -79,9 +80,8 @@ export class Notes {
     return () => clearInterval(t);
   }
 
-  register(app: FastifyInstance, auth: Auth) {
-    // Public, like the rest of the display.
-    app.get('/api/notes', async () => this.list());
+  register(app: FastifyInstance, auth: Auth, display: DisplayGuard) {
+    app.get('/api/notes', { preHandler: display }, async () => this.list());
 
     app.post('/api/notes', { preHandler: auth.guard }, async (req) =>
       this.create(req.user!, NoteInput.parse(req.body)),

@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import sharp from 'sharp';
 import { z } from 'zod';
 import type { Auth } from '../auth';
+import type { DisplayGuard } from '../displays';
 import { getSetting, setSetting, type DB } from '../db';
 import type { LiveHub } from '../live';
 import type { SecretBox } from '../secrets';
@@ -188,9 +189,10 @@ export class Photos {
       await fs.rm(path.join(this.cacheDir, s.n), { force: true });
   }
 
-  register(app: FastifyInstance, auth: Auth) {
+  register(app: FastifyInstance, auth: Auth, display: DisplayGuard) {
     app.get<{ Querystring: { source?: string; folder?: string; albumId?: string } }>(
       '/api/photos/next',
+      { preHandler: display },
       async (req) => {
         const source = req.query.source === 'synology' ? 'synology' : 'folder';
         const photo = await this.next(source, req.query.folder ?? '', req.query.albumId ?? '');
@@ -200,6 +202,7 @@ export class Photos {
 
     app.get<{ Params: { id: string }; Querystring: { w?: string; h?: string } }>(
       '/api/photos/img/:id',
+      { preHandler: display },
       async (req, reply) => {
         const buf = await this.image(
           req.params.id,

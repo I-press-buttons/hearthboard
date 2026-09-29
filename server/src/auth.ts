@@ -11,7 +11,7 @@ import {
 } from '@hearthboard/shared';
 import { getSetting, setSetting, type DB } from './db';
 import type { UserRow, Users } from './users';
-import { HttpError } from './util';
+import { hashToken, HttpError } from './util';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -37,8 +37,6 @@ interface SessionRow {
   created_at: number;
   last_seen: number;
 }
-
-const hashToken = (token: string) => crypto.createHash('sha256').update(token).digest('hex');
 
 export interface AuthOptions {
   /** Password for an "admin" user created on first start (HEARTHBOARD_ADMIN_PASSWORD). */
