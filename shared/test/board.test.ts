@@ -115,3 +115,28 @@ describe('weather helpers', () => {
     expect(weatherInfo(1234).label).toBe('Unknown');
   });
 });
+
+describe('board defaults', () => {
+  it('fills in every setting a saved board leaves out', () => {
+    const board = Board.parse({
+      id: 'old',
+      name: 'Saved before dimming existed',
+      widgets: [{ id: 'w1', type: 'clock', x: 0, y: 0, w: 4, h: 2 }],
+    });
+    expect(board.dim).toEqual({ enabled: false, start: '22:00', end: '06:30', level: 0.25 });
+    expect(board.widgets[0].config).toEqual({});
+    // Partly set: the rest still comes from the defaults.
+    expect(Board.parse({ id: 'b', name: 'B', dim: { enabled: true } }).dim).toEqual({
+      enabled: true,
+      start: '22:00',
+      end: '06:30',
+      level: 0.25,
+    });
+  });
+
+  it("doesn't share one default between boards", () => {
+    const a = Board.parse({ id: 'a', name: 'A' });
+    a.dim.level = 0.9;
+    expect(Board.parse({ id: 'b', name: 'B' }).dim.level).toBe(0.25);
+  });
+});
