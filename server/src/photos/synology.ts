@@ -42,6 +42,8 @@ const SESSION_ERRORS = new Set([105, 106, 107, 119]);
 export class SynologyPhotos {
   private sid: string | null = null;
   private dispatcher: Agent | undefined;
+  /** Set once this DSM turned down the session cookie for a thumbnail (see thumbnail()). */
+  private thumbSidInUrl = false;
 
   constructor(
     private secret: SynologySecret,
@@ -167,11 +169,13 @@ export class SynologyPhotos {
 
   /**
    * The XL thumbnail (longest side ~1280px), already rotated and in JPEG. Unlike the calls
-   * above this is still a GET with the session ID in the URL, because we couldn't confirm
-   * that DSM accepts a POST for a thumbnail download.
+   * above this is a GET, because we couldn't confirm that DSM accepts a POST for a thumbnail
+   * download. The session goes in DSM's documented session cookie (`id`) instead of the URL;
+   * a DSM that doesn't take it for thumbnails gets the `_sid` parameter, as before.
    */
   async thumbnail(unitId: number, cacheKey: string): Promise<Buffer> {
-    const fetchIt = async () => {
+    const fetchIt = async (sidInUrl: boolean) => {
+      const sid = this.sid ?? (await this.login());
       const query = new URLSearchParams({
         api: 'SYNO.Foto.Thumbnail',
         version: '1',
@@ -181,16 +185,28 @@ export class SynologyPhotos {
         type: 'unit',
         size: 'xl',
         cache_key: cacheKey,
-        _sid: this.sid ?? (await this.login()),
       });
-      return this.send(`${this.endpoint()}?${query}`, {});
+      // A session ID is plain letters, digits, '-', '_' and '.'; anything else stays out of
+      // a header.
+      if (sidInUrl || !/^[\w.-]+$/.test(sid)) {
+        query.set('_sid', sid);
+        return this.send(`${this.endpoint()}?${query}`, {});
+      }
+      return this.send(`${this.endpoint()}?${query}`, { headers: { cookie: `id=${sid}` } });
     };
-    let res = await fetchIt();
-    if (!(res.headers.get('content-type') ?? '').startsWith('image/')) {
-      this.sid = null;
-      res = await fetchIt();
+    const isImage = (r: Response) =>
+      r.ok && (r.headers.get('content-type') ?? '').startsWith('image/');
+    let res = await fetchIt(this.thumbSidInUrl);
+    if (!isImage(res) && !this.thumbSidInUrl) {
+      // Refused: either the session ran out, or this DSM only reads it from the URL.
+      res = await fetchIt(true);
+      if (isImage(res)) this.thumbSidInUrl = true;
     }
-    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) {
+    if (!isImage(res)) {
+      this.sid = null;
+      res = await fetchIt(this.thumbSidInUrl);
+    }
+    if (!isImage(res)) {
       throw new Error(`Could not load the Synology thumbnail (${res.status})`);
     }
     return Buffer.from(await res.arrayBuffer());
