@@ -9,13 +9,16 @@ export const WidgetInstance = z.object({
   y: z.number().int().min(0),
   w: z.number().int().min(1),
   h: z.number().int().min(1),
-  config: z.record(z.unknown()).default({}),
+  config: z.record(z.string(), z.unknown()).default({}),
   /** Text size for just this widget; leave unset to follow the board. */
   textSize: z.enum(TEXT_SIZE_IDS).optional().catch(undefined),
 });
 export type WidgetInstance = z.infer<typeof WidgetInstance>;
 
 const HHMM = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM');
+
+/** Display dimming as a new board has it. */
+const DIM_DEFAULTS = { enabled: false, start: '22:00', end: '06:30', level: 0.25 };
 
 /** "Between these times, show that board instead." Days use 0 = Sunday … 6 = Saturday. */
 export const BoardScheduleEntry = z.object({
@@ -47,12 +50,14 @@ export const Board = z.object({
   /** Dim the display between these times (local time), e.g. 22:00 -> 06:30. */
   dim: z
     .object({
-      enabled: z.boolean().default(false),
-      start: HHMM.default('22:00'),
-      end: HHMM.default('06:30'),
-      level: z.number().min(0.05).max(1).default(0.25),
+      enabled: z.boolean().default(DIM_DEFAULTS.enabled),
+      start: HHMM.default(DIM_DEFAULTS.start),
+      end: HHMM.default(DIM_DEFAULTS.end),
+      level: z.number().min(0.05).max(1).default(DIM_DEFAULTS.level),
     })
-    .default({}),
+    // The whole object, not `{}`: zod 4 returns a default as it is, without filling in the
+    // fields' own defaults, so a board saved without `dim` would get an empty one.
+    .default(() => ({ ...DIM_DEFAULTS })),
   /** Shift the whole board by a pixel or two every few minutes to limit burn-in. */
   pixelShift: z.boolean().default(true),
   /**

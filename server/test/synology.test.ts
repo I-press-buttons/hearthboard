@@ -1,19 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { SynologyPhotos } from '../src/photos/synology';
 
-/** A pretend DSM. Like the real one it reads its parameters from the URL or a form body. */
-function fakeDsm(password = 'pw') {
+/**
+ * A pretend DSM. Like the real one it reads its parameters from the URL or a form body, and the
+ * session from `_sid` or the `id` cookie (`sessionCookie: false` plays a DSM that ignores it).
+ */
+function fakeDsm(password = 'pw', { sessionCookie = true } = {}) {
   let sidCounter = 0;
   const valid = new Set<string>();
   const log: string[] = [];
-  const requests: { method: string; url: string; api: string }[] = [];
+  const requests: { method: string; url: string; api: string; cookie: string | null }[] = [];
   const f = (async (input: string | URL, init: RequestInit = {}) => {
     const url = new URL(String(input));
     const method = init.method ?? 'GET';
     const q = method === 'POST' ? new URLSearchParams(String(init.body)) : url.searchParams;
     const api = q.get('api')!;
     log.push(`${api}.${q.get('method')}`);
-    requests.push({ method, url: String(input), api });
+    const cookie = new Headers(init.headers).get('cookie');
+    requests.push({ method, url: String(input), api, cookie });
     const json = (body: unknown) =>
       new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
     if (api === 'SYNO.API.Auth') {
@@ -22,7 +26,9 @@ function fakeDsm(password = 'pw') {
       valid.add(sid);
       return json({ success: true, data: { sid } });
     }
-    if (!valid.has(q.get('_sid') ?? '')) return json({ success: false, error: { code: 119 } });
+    const fromCookie = sessionCookie ? /(?:^|;\s*)id=([^;]+)/.exec(cookie ?? '')?.[1] : undefined;
+    if (!valid.has(q.get('_sid') ?? fromCookie ?? ''))
+      return json({ success: false, error: { code: 119 } });
     if (api === 'SYNO.Foto.Browse.Album')
       return json({ success: true, data: { list: [{ id: 7, name: 'Summer', item_count: 2 }] } });
     if (api === 'SYNO.Foto.Browse.Item') {
@@ -112,9 +118,40 @@ describe('SynologyPhotos', () => {
     const posts = dsm.requests.filter((r) => r.method === 'POST');
     expect(posts.map((r) => r.api)).toContain('SYNO.API.Auth');
     for (const r of posts) expect(new URL(r.url).search).toBe('');
-    expect(dsm.requests.filter((r) => r.method !== 'POST').map((r) => r.api)).toEqual([
-      'SYNO.Foto.Thumbnail',
-    ]);
+    const gets = dsm.requests.filter((r) => r.method !== 'POST');
+    expect(gets.map((r) => r.api)).toEqual(['SYNO.Foto.Thumbnail']);
+    // The thumbnail carries the session in DSM's cookie, not the URL.
+    expect(gets[0].url).not.toContain('_sid');
+    expect(gets[0].cookie).toBe('id=sid1');
+  });
+
+  it('puts the session ID in the thumbnail URL for a DSM that ignores the cookie', async () => {
+    const dsm = fakeDsm('pw', { sessionCookie: false });
+    const c = new SynologyPhotos(
+      { url: 'http://nas:5000', username: 'wall', password: 'pw' },
+      dsm.f,
+    );
+    expect((await c.thumbnail(11, '11_1')).length).toBe(3);
+    const thumbs = () => dsm.requests.filter((r) => r.api === 'SYNO.Foto.Thumbnail');
+    expect(thumbs().map((r) => new URL(r.url).searchParams.get('_sid'))).toEqual([null, 'sid1']);
+    // It remembers, so later thumbnails take one request.
+    await c.thumbnail(11, '11_1');
+    expect(thumbs()).toHaveLength(3);
+    expect(dsm.log.filter((l) => l === 'SYNO.API.Auth.login')).toHaveLength(1);
+  });
+
+  it('signs in again when the session runs out during a thumbnail', async () => {
+    for (const sessionCookie of [true, false]) {
+      const dsm = fakeDsm('pw', { sessionCookie });
+      const c = new SynologyPhotos(
+        { url: 'http://nas:5000', username: 'wall', password: 'pw' },
+        dsm.f,
+      );
+      await c.thumbnail(11, '11_1');
+      dsm.expireAll();
+      expect((await c.thumbnail(11, '11_1')).length).toBe(3);
+      expect(dsm.log.filter((l) => l === 'SYNO.API.Auth.login')).toHaveLength(2);
+    }
   });
 
   it('sends passwords with special characters intact', async () => {

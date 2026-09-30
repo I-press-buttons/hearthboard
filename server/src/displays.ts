@@ -52,8 +52,20 @@ const CODE_TTL_MS = 10 * 60_000;
 const LINK_TTL_MS = 24 * 3600_000;
 /** Screens waiting to be approved at once, so the list can't be flooded. */
 const MAX_PENDING = 20;
-/** Codes one address may have waiting; asking for another replaces its oldest. */
-const MAX_PENDING_PER_ADDRESS = 3;
+/**
+ * Codes one address may have waiting, so one device can't take every place. Screens behind a
+ * reverse proxy (without HEARTHBOARD_TRUST_PROXY) all share the proxy's address, so this leaves
+ * room for a whole household pairing at once.
+ */
+const MAX_PENDING_PER_ADDRESS = 10;
+/**
+ * A waiting screen asks every few seconds whether it has been approved. A code nobody has asked
+ * about for this long belongs to a screen that is gone (closed, or it lost its cookie), and makes
+ * room for new ones. Codes that are still being shown are never taken away.
+ */
+const ABANDONED_MS = 30_000;
+/** How often a waiting screen's polls are written down. */
+const PENDING_SEEN_MS = 1_000;
 
 const newCode = () =>
   Array.from(
@@ -112,14 +124,30 @@ export class Displays {
       .run(now);
   }
 
-  /** The code this request's screen is showing, if it is still waiting to be approved. */
+  /**
+   * The code this request's screen is showing, if it is still waiting to be approved. Asking
+   * keeps the code alive (see ABANDONED_MS).
+   */
   private pending(req: FastifyRequest): DisplayRow | null {
     const token = req.cookies[COOKIE];
     if (!token) return null;
+    const now = Date.now();
     const row = this.db
       .prepare('SELECT * FROM displays WHERE token_hash = ? AND approved = 0 AND expires_at > ?')
-      .get(hashToken(token), Date.now()) as DisplayRow | undefined;
-    return row ?? null;
+      .get(hashToken(token), now) as DisplayRow | undefined;
+    if (!row) return null;
+    if (now - row.last_seen >= PENDING_SEEN_MS) {
+      this.db.prepare('UPDATE displays SET last_seen = ? WHERE id = ?').run(now, row.id);
+      row.last_seen = now;
+    }
+    return row;
+  }
+
+  /** Drop codes whose screens stopped asking about them. */
+  private pruneAbandoned(now = Date.now()) {
+    this.db
+      .prepare('DELETE FROM displays WHERE approved = 0 AND code IS NOT NULL AND last_seen < ?')
+      .run(now - ABANDONED_MS);
   }
 
   private dto(r: DisplayRow): DisplayDTO {
@@ -183,20 +211,25 @@ export class Displays {
       if (waiting) return { code: formatPairCode(waiting.code!), expiresAt: waiting.expires_at! };
       if (this.current(req)) throw new HttpError(409, 'This screen is already paired.');
 
-      // One device (say, a script on the network) can't fill every place: it only ever
-      // replaces its own oldest codes. A screen that lost its cookie still gets a new one.
-      const mine = this.db
-        .prepare(
-          'SELECT id FROM displays WHERE approved = 0 AND requested_by = ? ORDER BY created_at DESC, rowid DESC',
-        )
-        .all(req.ip) as { id: string }[];
-      for (const { id } of mine.slice(MAX_PENDING_PER_ADDRESS - 1))
-        this.db.prepare('DELETE FROM displays WHERE id = ?').run(id);
-
-      const { n } = this.db
-        .prepare('SELECT COUNT(*) AS n FROM displays WHERE approved = 0')
-        .get() as { n: number };
-      if (n >= MAX_PENDING)
+      // Codes are never taken from a screen that is still showing one: that is what made
+      // screens sharing an address (behind a reverse proxy) replace each other's codes every
+      // few seconds. Only codes nobody has asked about for a while make room. One device (say,
+      // a script on the network) can hold at most MAX_PENDING_PER_ADDRESS places, and a screen
+      // that lost its cookie still gets a new code; its old one lapses by itself.
+      this.pruneAbandoned(now);
+      const count = (sql: string, ...args: unknown[]) =>
+        (this.db.prepare(sql).get(...args) as { n: number }).n;
+      if (
+        count(
+          'SELECT COUNT(*) AS n FROM displays WHERE approved = 0 AND requested_by = ?',
+          req.ip,
+        ) >= MAX_PENDING_PER_ADDRESS
+      )
+        throw new HttpError(
+          429,
+          'Too many screens from this address are waiting to be paired. Pair one of them, or try again in a minute.',
+        );
+      if (count('SELECT COUNT(*) AS n FROM displays WHERE approved = 0') >= MAX_PENDING)
         throw new HttpError(429, 'Too many screens are waiting to be paired. Try again in a bit.');
 
       let code = newCode();

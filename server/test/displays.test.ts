@@ -317,24 +317,90 @@ describe('pairing with a code', () => {
     app = await testApp();
     const pair = (from: string) =>
       app!.app.inject({ method: 'POST', url: '/api/displays/pair', remoteAddress: from });
-    // No cookie kept, so each request is a "new screen": it only replaces its own codes.
-    const codes: string[] = [];
-    for (let i = 0; i < 50; i++) {
-      const res = await pair('192.168.1.66');
-      expect(res.statusCode).toBe(200);
-      codes.push(res.json().code);
-    }
-    const waiting = app.db
-      .prepare('SELECT COUNT(*) AS n FROM displays WHERE approved = 0')
-      .get() as { n: number };
-    expect(waiting.n).toBe(3);
-    // Its latest code still works, and the kitchen TV can still get one.
+    // No cookie kept, so each request is a "new screen" that never asks about its code again.
+    const results = [];
+    for (let i = 0; i < 50; i++) results.push(await pair('192.168.1.66'));
+    const ok = results.filter((r) => r.statusCode === 200);
+    expect(ok).toHaveLength(10);
+    expect(results.at(-1)!.statusCode).toBe(429);
+    expect(results.at(-1)!.json().error).toMatch(/from this address/);
+    const waiting = () =>
+      (
+        app!.db.prepare('SELECT COUNT(*) AS n FROM displays WHERE approved = 0').get() as {
+          n: number;
+        }
+      ).n;
+    expect(waiting()).toBe(10);
+    // The kitchen TV, on another address, can still get a code.
+    expect((await pair('192.168.1.20')).statusCode).toBe(200);
+
+    // Nothing asks about the script's codes, so they lapse and make room again.
+    app.db
+      .prepare('UPDATE displays SET last_seen = ? WHERE requested_by = ?')
+      .run(Date.now() - 31_000, '192.168.1.66');
+    const again = await pair('192.168.1.66');
+    expect(again.statusCode).toBe(200);
+    expect(waiting()).toBe(2);
+    await app.login();
     const approve = (code: string) =>
       app!.inject('POST', '/api/displays/approve', { code, name: 'TV' });
-    await app.login();
-    expect((await approve(codes[0])).status).toBe(404);
-    expect((await approve(codes[49])).status).toBe(200);
-    expect((await pair('192.168.1.20')).statusCode).toBe(200);
+    expect((await approve(ok[0].json().code)).status).toBe(404);
+    expect((await approve(again.json().code)).status).toBe(200);
+  });
+
+  it('never takes a code from a screen that is still showing it, even when screens share an address', async () => {
+    // Behind a reverse proxy without HEARTHBOARD_TRUST_PROXY every screen has the proxy's
+    // address. Each screen runs the pairing page's loop: ask whether it's paired, and ask for a
+    // code when it has none.
+    app = await testApp();
+    const tvs = Array.from({ length: 6 }, () => app!.client());
+    const poll = async (tv: Client) => {
+      const s = await me(tv);
+      if (s.pending) return s.pending.code;
+      return (await tv.inject('POST', '/api/displays/pair')).body.code as string;
+    };
+    const shown: string[][] = tvs.map(() => []);
+    for (let round = 0; round < 5; round++)
+      for (const [i, tv] of tvs.entries()) shown[i].push(await poll(tv));
+    for (const codes of shown) expect(new Set(codes).size).toBe(1);
+
+    // Every code the admin reads off a screen works, and each screen is then in.
+    const admin = app.client();
+    await admin.login();
+    for (const [i, tv] of tvs.entries()) {
+      const res = await admin.inject('POST', '/api/displays/approve', {
+        code: shown[i][0],
+        name: `Screen ${i + 1}`,
+      });
+      expect(res.status).toBe(200);
+      expect((await me(tv)).allowed).toBe(true);
+    }
+  });
+
+  it("keeps a waiting screen's code while it keeps asking, and drops it once it stops", async () => {
+    app = await testApp();
+    const { tv, code } = await unpairedTv(app);
+    const other = await unpairedTv(app);
+    const seen = (c: string) =>
+      app!.db
+        .prepare('SELECT last_seen FROM displays WHERE code = ?')
+        .pluck()
+        .get(c.replace('-', '')) as number | undefined;
+    const longAgo = Date.now() - 31_000;
+    app.db.prepare('UPDATE displays SET last_seen = ?').run(longAgo);
+
+    // The first screen asks again; the second has gone quiet.
+    expect((await me(tv)).pending?.code).toBe(code);
+    expect(seen(code)).toBeGreaterThan(Date.now() - 5000);
+    expect(seen(other.code)).toBe(longAgo);
+
+    // The next screen that asks for a code clears out the quiet one only.
+    await unpairedTv(app);
+    expect(seen(other.code)).toBeUndefined();
+    expect((await me(tv)).pending?.code).toBe(code);
+    // The quiet screen gets a fresh code if it comes back.
+    expect((await me(other.tv)).pending).toBeNull();
+    expect((await other.tv.inject('POST', '/api/displays/pair')).status).toBe(200);
   });
 
   it('is for admins to approve', async () => {
