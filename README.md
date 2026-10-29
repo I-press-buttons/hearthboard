@@ -358,3 +358,7 @@ Repository layout: `shared/` (types and schemas used by both sides),
 Scripture quotations are from the ESV® Bible (The Holy Bible, English Standard
 Version®), © 2001 by Crossway, a publishing ministry of Good News Publishers.
 Used by permission. All rights reserved.
+
+## Security updates (October 2026)
+
+Rebuild and recreate existing containers to adopt patched Node.js 22.23.4. For local development use `nvm use` and `npm ci`. The lockfile patches undici, Vite and modern minimatch; legacy minimatch 3.x keeps its separate API.
