@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build: compile the web app and bundle the server ----
-FROM node:22-bookworm-slim AS build
+FROM node:22.23.4-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY shared/package.json shared/
@@ -14,7 +14,7 @@ RUN npm run build \
 
 # ---- runtime ----
 # Starts as root only to hand /data to PUID:PGID, then the server switches to that user.
-FROM node:22-bookworm-slim
+FROM node:22.23.4-bookworm-slim
 ENV NODE_ENV=production \
     PORT=8080 \
     HEARTHBOARD_DATA=/data \
